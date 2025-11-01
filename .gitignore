@@ -1,0 +1,85 @@
+# --- OS noise ---
+.DS_Store
+Thumbs.db
+
+# --- Python caches ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+.python-version
+
+# --- Editors and IDEs ---
+.vscode/
+.idea/
+
+# --- Logs and temp ---
+*.log
+logs/
+tmp/
+temp/
+
+# --- Outputs and runs ---
+runs/
+outputs/
+checkpoints/
+wandb/
+tensorboard/
+
+# --- Models and large binaries ---
+*.pt
+*.pth
+*.onnx
+*.engine
+*.plan
+
+# --- Videos, frames, and images (keep repo light) ---
+# keep a tiny sample clip with .gitkeep if needed
+input_videos/
+videos/
+frames/
+pictures/
+images/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.gif
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+*.webp
+
+# --- Data dumps ---
+# comment out lines you want to track
+data/
+datasets/
+*.npz
+*.npy
+*.csv
+*.parquet
+
+# --- Ultralytics/YOLO artefacts ---
+ultralytics/
+*labels*.txt
+
+# --- Notebooks’ auto-saves ---
+*.ipynb~*
+
+# --- Mac quarantine attribute files ---
+._*
