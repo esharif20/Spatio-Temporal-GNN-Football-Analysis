@@ -73,6 +73,7 @@ datasets/
 *.npy
 *.csv
 *.parquet
+*.pt
 
 # --- Ultralytics/YOLO artefacts ---
 ultralytics/
