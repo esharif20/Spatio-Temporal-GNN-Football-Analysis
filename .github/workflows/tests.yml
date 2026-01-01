@@ -22,10 +22,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt --ignore-installed torch torchvision
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-mock pytest-cov
 
       - name: Run tests
         run: |
-          export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
-          python -m pytest tests/ -v --tb=short
+          chmod +x tests/run_tests.sh
+          ./tests/run_tests.sh
