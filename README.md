@@ -1,4 +1,4 @@
-# ⚽ Football Video Analysis
+# Football Video Analysis Pipeline
 
 YOLO detection → ByteTrack tracking → K-means team assignment → Annotated video output.
 
@@ -10,7 +10,7 @@ Input Video → [Detection] → [Tracking] → [Team Assignment] → Output Vide
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 football_analysis/
@@ -44,7 +44,7 @@ football_analysis/
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Setup
@@ -61,7 +61,7 @@ python main.py
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests (51 tests)
@@ -81,7 +81,7 @@ python -m pytest tests/ -v
 
 ---
 
-## 🎯 Design Choices
+## Design Choices
 
 ### Why 1280px resolution?
 ```
@@ -114,7 +114,7 @@ Manual filtering    → same speed, simpler code ✓
 
 ---
 
-## ⚙️ Key Configuration
+## Key Configuration
 
 ```python
 # src/trackers/tracker.py
@@ -133,7 +133,7 @@ self.model.model.half()
 
 ---
 
-## 📊 Results
+## Results
 
 | Metric | Value |
 |--------|-------|
@@ -144,7 +144,7 @@ self.model.model.half()
 
 ---
 
-## 🔧 Commands Reference
+## Commands Reference
 
 ```bash
 # Run pipeline
@@ -164,7 +164,7 @@ python main.py
 
 ---
 
-## 📦 Dependencies
+## Dependencies
 
 ```txt
 numpy==1.26.4
@@ -178,7 +178,7 @@ scikit-learn==1.4.0
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -189,7 +189,7 @@ scikit-learn==1.4.0
 
 ---
 
-## 📚 References
+## References
 
 - [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
 - [Supervision (ByteTrack)](https://github.com/roboflow/supervision)
