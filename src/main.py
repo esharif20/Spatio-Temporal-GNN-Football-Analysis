@@ -163,6 +163,23 @@ def main():
         
         # Track objects
         tracker, tracks = track_objects(frames, use_cache=True)
+
+        # Print detection stats
+        total_frames = len(tracks["ball"])
+        ball_detected = sum(1 for b in tracks["ball"] if b.get(1, {}).get("bbox"))
+        frames_with_players = sum(1 for p in tracks["players"] if len(p) > 0)
+        frames_with_refs = sum(1 for r in tracks["referee"] if len(r) > 0)
+        avg_players = sum(len(p) for p in tracks["players"]) / total_frames
+
+        print(f"\n=== Detection Stats ===")
+        print(f"Ball detected: {ball_detected}/{total_frames} frames ({100*ball_detected/total_frames:.1f}%)")
+        print(f"Frames with players: {frames_with_players}/{total_frames} ({100*frames_with_players/total_frames:.1f}%)")
+        print(f"Frames with referees: {frames_with_refs}/{total_frames} ({100*frames_with_refs/total_frames:.1f}%)")
+        print(f"Avg players per frame: {avg_players:.1f}")
+        print("=" * 25 + "\n")
+
+        # Interpolate ball positions
+        tracks["ball"] = tracker.interpolate_ball_positions(tracks["ball"])
         
         # Assign teams
         tracks = assign_teams(frames, tracks)

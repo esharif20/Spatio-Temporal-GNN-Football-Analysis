@@ -1,71 +1,63 @@
 """
 Object tracking module using YOLO and ByteTrack.
-Detects and tracks players, referees, and the ball across video frames.
 """
 
 import os
 import pickle
 import sys
-from pathlib import Path
-
+import pandas as pd
 import cv2
 import numpy as np
 import supervision as sv
 from ultralytics import YOLO
+from tqdm import tqdm
 
 sys.path.append("../")
 from utils import get_bbox_width, get_center_of_bbox
 
 
 class Tracker:
-    """
-    Tracks objects (players, referees, ball) across video frames.
-    Uses YOLO for detection and ByteTrack for multi-object tracking.
-    """
     
     def __init__(self, model_path):
-        """
-        Initialise tracker with YOLO model.
-        
-        Args:
-            model_path: Path to YOLO model weights file
-        """
         self.model = YOLO(model_path)
+        self.model.to('mps')
+        self.model.model.half()  # FP16 for speed
         self.byte_tracker = sv.ByteTrack()
+        print(f"Model loaded on: {self.model.device}")
+
+    def interpolate_ball_positions(self, ball_positions):
+        # Track which frames had real detections
+        detected_frames = set()
+        for i, x in enumerate(ball_positions):
+            if x.get(1, {}).get('bbox'):
+                detected_frames.add(i)
+        
+        # Extract bboxes
+        ball_positions_list = [x.get(1, {}).get('bbox', []) for x in ball_positions]
+        df_ball_positions = pd.DataFrame(ball_positions_list, columns=['x1', 'y1', 'x2', 'y2'])
+        
+        # Interpolate missing values
+        df_ball_positions = df_ball_positions.interpolate()
+        df_ball_positions = df_ball_positions.bfill()
+        
+        # Convert back with interpolation flag
+        ball_positions = [
+            {1: {"bbox": x, "interpolated": i not in detected_frames}} 
+            for i, x in enumerate(df_ball_positions.to_numpy().tolist())
+        ]
+        
+        return ball_positions
 
     def detect_frames(self, frames):
-        """
-        Run YOLO detection on all frames in batches.
-        
-        Args:
-            frames: List of video frames (numpy arrays)
-            
-        Returns:
-            List of YOLO detection results
-        """
-        batch_size = 20
         detections = []
         
-        for i in range(0, len(frames), batch_size):
-            batch = frames[i:i + batch_size]
-            results = self.model.predict(source=batch, conf=0.1, verbose=True)
-            detections.extend(results)
+        for i, frame in enumerate(tqdm(frames, desc="Detecting objects")):
+            results = self.model.predict(source=frame, conf=0.1, imgsz=1280, max_det=50, verbose=False)
+            detections.append(results[0])
             
         return detections
 
     def get_object_tracks(self, frames, read_from_stub=False, stub_path=None):
-        """
-        Generate or load object tracks for all frames.
-        
-        Args:
-            frames: List of video frames
-            read_from_stub: Whether to load cached tracks from disk
-            stub_path: Path to cached tracks pickle file
-            
-        Returns:
-            Dictionary containing tracks for players, referees, and ball
-        """
-        # Load cached tracks if available
         if read_from_stub and stub_path:
             abs_stub = os.path.abspath(stub_path)
             if os.path.exists(abs_stub):
@@ -74,58 +66,83 @@ class Tracker:
                 print(f"[stub] Loaded tracks from {abs_stub}")
                 return tracks
             else:
-                print(f"[stub] Stub not found at {abs_stub}. Running detection")
+                print(f"[stub] Stub not found. Running detection...")
 
-        # Run detection on all frames
-        detections = self.detect_frames(frames)
-        
-        # Initialise track storage
-        tracks = {
-            "players": [],
-            "referee": [],
-            "ball": []
-        }
+        tracks = {"players": [], "referee": [], "ball": []}
 
-        # Build class name mappings
-        cls_names = detections[0].names if detections else {}
+        cls_names = self.model.names
         cls_names_inv = {v: k for k, v in cls_names.items()}
+        
+        ball_cls_id = cls_names_inv.get("ball")
+        player_cls_id = cls_names_inv.get("player")
+        goalkeeper_cls_id = cls_names_inv.get("goalkeeper")
+        referee_cls_id = cls_names_inv.get("referee")
 
-        # Process each frame's detections
-        for frame_num, det in enumerate(detections):
-            det_sv = sv.Detections.from_ultralytics(det)
-
-            # Normalise goalkeeper class to player class
-            for idx, cid in enumerate(det_sv.class_id):
-                if cls_names.get(cid) == "goalkeeper":
-                    det_sv.class_id[idx] = cls_names_inv.get("player", cid)
-
-            # Update tracker with current frame detections
-            det_trk = self.byte_tracker.update_with_detections(det_sv)
-
-            # Initialise empty track dictionaries for this frame
+        for frame_idx, frame in enumerate(tqdm(frames, desc="Detecting objects")):
             tracks["players"].append({})
             tracks["referee"].append({})
             tracks["ball"].append({})
-
-            # Store tracked objects by class
-            for i in range(len(det_trk)):
-                bbox = det_trk.xyxy[i].tolist()
-                cid = det_trk.class_id[i]
-                tid = det_trk.tracker_id[i]
+            
+            results = self.model.predict(source=frame, conf=0.01, imgsz=1280, max_det=50, verbose=False)
+            det = results[0]
+            
+            # Extract ball (before ByteTrack)
+            for i in range(len(det.boxes)):
+                cid = int(det.boxes.cls[i])
+                if cid == ball_cls_id:
+                    bbox = det.boxes.xyxy[i].tolist()
+                    conf = float(det.boxes.conf[i])
+                    if 1 not in tracks["ball"][frame_idx]:
+                        tracks["ball"][frame_idx][1] = {"bbox": bbox, "conf": conf}
+                    elif conf > tracks["ball"][frame_idx][1].get("conf", 0):
+                        tracks["ball"][frame_idx][1] = {"bbox": bbox, "conf": conf}
+            
+            # Players/refs through ByteTrack
+            det_sv = sv.Detections.from_ultralytics(det)
+            
+            keep_mask = []
+            for i, (cid, conf) in enumerate(zip(det_sv.class_id, det_sv.confidence)):
+                is_person = cid in [player_cls_id, goalkeeper_cls_id, referee_cls_id]
+                high_conf = conf >= 0.1
+                keep_mask.append(is_person and high_conf)
+            
+            keep_mask = np.array(keep_mask)
+            
+            if keep_mask.any():
+                det_sv_filtered = det_sv[keep_mask]
                 
-                if tid is None:
-                    continue
+                for idx, cid in enumerate(det_sv_filtered.class_id):
+                    if cid == goalkeeper_cls_id:
+                        det_sv_filtered.class_id[idx] = player_cls_id
 
-                if cid == cls_names_inv.get("player"):
-                    tracks["players"][frame_num][int(tid)] = {"bbox": bbox}
-                    
-                elif cid == cls_names_inv.get("referee"):
-                    tracks["referee"][frame_num][int(tid)] = {"bbox": bbox}
-                    
-                elif cid == cls_names_inv.get("ball"):
-                    tracks["ball"][frame_num][1] = {"bbox": bbox}
+                det_trk = self.byte_tracker.update_with_detections(det_sv_filtered)
 
-        # Save tracks to stub file for future use
+                for i in range(len(det_trk)):
+                    bbox = det_trk.xyxy[i].tolist()
+                    cid = det_trk.class_id[i]
+                    tid = det_trk.tracker_id[i]
+                    
+                    if tid is None:
+                        continue
+
+                    if cid == player_cls_id:
+                        tracks["players"][frame_idx][int(tid)] = {"bbox": bbox}
+                    elif cid == referee_cls_id:
+                        tracks["referee"][frame_idx][int(tid)] = {"bbox": bbox}
+            else:
+                empty_det = sv.Detections.empty()
+                self.byte_tracker.update_with_detections(empty_det)
+
+        # Stats
+        ball_detected = sum(1 for b in tracks["ball"] if b.get(1))
+        frames_with_players = sum(1 for p in tracks["players"] if len(p) > 0)
+        frames_with_refs = sum(1 for r in tracks["referee"] if len(r) > 0)
+        
+        print(f"\n=== Detection Stats ===")
+        print(f"Ball: {ball_detected}/{len(frames)} ({100*ball_detected/len(frames):.1f}%)")
+        print(f"Players: {frames_with_players}/{len(frames)} ({100*frames_with_players/len(frames):.1f}%)")
+        print(f"Referees: {frames_with_refs}/{len(frames)} ({100*frames_with_refs/len(frames):.1f}%)")
+
         if stub_path:
             abs_stub = os.path.abspath(stub_path)
             os.makedirs(os.path.dirname(abs_stub), exist_ok=True)
@@ -136,23 +153,12 @@ class Tracker:
         return tracks
 
     def draw_ellipse(self, frame, bbox, colour, track_id=None):
-        """
-        Draw ellipse at player/referee feet with optional track ID label.
-        
-        Args:
-            frame: Video frame to draw on
-            bbox: Bounding box [x1, y1, x2, y2]
-            colour: BGR colour tuple
-            track_id: Optional track ID to display
-            
-        Returns:
-            Modified frame with ellipse drawn
-        """
+        """Draw ellipse at player feet with track ID box."""
         y2 = int(bbox[3])
         x_center, _ = get_center_of_bbox(bbox)
         width = get_bbox_width(bbox)
 
-        # Draw ellipse at bottom of bounding box
+        # Main ellipse
         cv2.ellipse(
             frame,
             center=(x_center, y2),
@@ -162,19 +168,18 @@ class Tracker:
             endAngle=235,
             color=colour,
             thickness=2,
-            lineType=cv2.LINE_4
+            lineType=cv2.LINE_AA
         )
 
-        # Draw track ID label if provided
+        # Track ID rectangle
         if track_id is not None:
-            rectangle_width = 40
-            rectangle_height = 20
-            x1_rect = x_center - rectangle_width // 2
-            x2_rect = x_center + rectangle_width // 2
-            y1_rect = (y2 - rectangle_height // 2) + 15
-            y2_rect = (y2 + rectangle_height // 2) + 15
+            rect_w, rect_h = 40, 20
+            x1_rect = x_center - rect_w // 2
+            x2_rect = x_center + rect_w // 2
+            y1_rect = (y2 - rect_h // 2) + 15
+            y2_rect = (y2 + rect_h // 2) + 15
 
-            # Draw background rectangle
+            # Background rectangle
             cv2.rectangle(
                 frame,
                 (int(x1_rect), int(y1_rect)),
@@ -183,12 +188,12 @@ class Tracker:
                 cv2.FILLED
             )
 
-            # Adjust text position for triple-digit IDs
+            # Text position
             x1_text = x1_rect + 12
             if track_id > 99:
                 x1_text -= 10
 
-            # Draw track ID text
+            # Track ID text
             cv2.putText(
                 frame,
                 f"{track_id}",
@@ -196,50 +201,41 @@ class Tracker:
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 (0, 0, 0),
-                2
+                2,
+                cv2.LINE_AA
             )
 
         return frame
 
-    def draw_triangle(self, frame, bbox, colour):
+    def draw_triangle(self, frame, bbox, colour, interpolated=False):
         """
-        Draw triangle marker above ball position.
-        
-        Args:
-            frame: Video frame to draw on
-            bbox: Bounding box [x1, y1, x2, y2]
-            colour: BGR colour tuple
-            
-        Returns:
-            Modified frame with triangle drawn
+        Draw triangle marker below ball position.
+        Points down so ball is visible above.
         """
-        y = int(bbox[1])
+        y2 = int(bbox[3])  # Bottom of ball
         x, _ = get_center_of_bbox(bbox)
 
-        # Define triangle points
+        # Colours
+        if interpolated:
+            colour = (0, 140, 255)  # Orange for interpolated
+        else:
+            colour = (0, 255, 0)    # Green for detected
+
+        # Triangle pointing UP to ball (sits below ball)
         triangle_points = np.array([
-            [x, y],
-            [x - 10, y - 20],
-            [x + 10, y - 20],
+            [x, y2 + 5],           # Top point (near ball)
+            [x - 12, y2 + 25],     # Bottom left
+            [x + 12, y2 + 25],     # Bottom right
         ])
         
-        # Draw filled triangle with black outline
-        cv2.drawContours(frame, [triangle_points], 0, colour, cv2.FILLED)
-        cv2.drawContours(frame, [triangle_points], 0, (0, 0, 0), 2)
+        # Filled triangle with border
+        cv2.drawContours(frame, [triangle_points], 0, colour, cv2.FILLED, cv2.LINE_AA)
+        cv2.drawContours(frame, [triangle_points], 0, (0, 0, 0), 2, cv2.LINE_AA)
 
         return frame
 
     def draw_annotations(self, video_frames, tracks):
-        """
-        Draw tracking annotations on all video frames.
-        
-        Args:
-            video_frames: List of video frames
-            tracks: Dictionary of tracked objects from get_object_tracks()
-            
-        Returns:
-            List of annotated video frames
-        """
+        """Draw annotations on all frames."""
         output_video_frames = []
         
         for frame_num, frame in enumerate(video_frames):
@@ -249,18 +245,19 @@ class Tracker:
             ball_dict = tracks["ball"][frame_num]
             referee_dict = tracks["referee"][frame_num]
 
-            # Draw players with team colours (or default red)
+            # Draw players
             for track_id, player in player_dict.items():
                 colour = player.get("team_colour", (0, 0, 255))
                 frame = self.draw_ellipse(frame, player["bbox"], colour, track_id)
 
-            # Draw referees (yellow ellipses)
+            # Draw referees (yellow)
             for _, ref in referee_dict.items():
                 frame = self.draw_ellipse(frame, ref["bbox"], (0, 255, 255))
 
-            # Draw ball (green triangle)
+            # Draw ball
             for track_id, ball in ball_dict.items():
-                frame = self.draw_triangle(frame, ball["bbox"], (0, 255, 0))
+                interpolated = ball.get("interpolated", False)
+                frame = self.draw_triangle(frame, ball["bbox"], (0, 255, 0), interpolated)
 
             output_video_frames.append(frame)
 
