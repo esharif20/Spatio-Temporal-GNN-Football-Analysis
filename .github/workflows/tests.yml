@@ -22,11 +22,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-mock pytest-cov
+          pip install pytest pytest-mock numpy opencv-python-headless pandas scikit-learn
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install ultralytics supervision
 
       - name: Run tests
-        run: |
-          chmod +x tests/run_tests.sh
-          ./tests/run_tests.sh
+        run: ./tests/run_tests.sh
