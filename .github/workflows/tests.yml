@@ -22,12 +22,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install torch==2.2.2 torchvision==0.17.2 --index-url https://download.pytorch.org/whl/cpu
-          pip install ultralytics==8.3.223 supervision==0.18.0
-          pip install pytest pytest-mock numpy opencv-python-headless pandas scikit-learn
+          pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt --ignore-installed torch torchvision
 
       - name: Run tests
         run: |
-          cd src && pip install -e . || true
           export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
           python -m pytest tests/ -v --tb=short
