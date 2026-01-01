@@ -84,3 +84,6 @@ ultralytics/
 
 # --- Mac quarantine attribute files ---
 ._*
+__pycache__/
+*.pyc
+src/runs/

@@ -138,11 +138,6 @@ class Tracker:
         frames_with_players = sum(1 for p in tracks["players"] if len(p) > 0)
         frames_with_refs = sum(1 for r in tracks["referee"] if len(r) > 0)
         
-        print(f"\n=== Detection Stats ===")
-        print(f"Ball: {ball_detected}/{len(frames)} ({100*ball_detected/len(frames):.1f}%)")
-        print(f"Players: {frames_with_players}/{len(frames)} ({100*frames_with_players/len(frames):.1f}%)")
-        print(f"Referees: {frames_with_refs}/{len(frames)} ({100*frames_with_refs/len(frames):.1f}%)")
-
         if stub_path:
             abs_stub = os.path.abspath(stub_path)
             os.makedirs(os.path.dirname(abs_stub), exist_ok=True)
