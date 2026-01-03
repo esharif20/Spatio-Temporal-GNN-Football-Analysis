@@ -124,6 +124,10 @@ typing_extensions==4.15.0
 tzdata==2025.2
 ultralytics==8.3.223
 ultralytics-thop==2.0.18
+
+# Re-Identification for track stabilization
+# Install torchreid with: pip install git+https://github.com/KaiyangZhou/deep-person-reid.git
+# Or use fallback (ResNet18) if not available
 uri-template==1.3.0
 urllib3==2.5.0
 wcwidth==0.2.14

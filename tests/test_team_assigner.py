@@ -25,12 +25,12 @@ class TestTeamAssignerInit:
         assert assigner is not None
     
     def test_team_assigner_has_team_colors(self):
-        """Test that TeamAssigner has team_colors attribute."""
+        """Test that TeamAssigner has cluster_centers or player_team_dict attribute."""
         from team_assigner.team_assigner import TeamAssigner
-        
+
         assigner = TeamAssigner()
-        
-        assert hasattr(assigner, 'team_colors') or hasattr(assigner, 'team_colours')
+
+        assert hasattr(assigner, 'cluster_centers') or hasattr(assigner, 'player_team_dict')
 
 
 class TestGetClusteringModel:

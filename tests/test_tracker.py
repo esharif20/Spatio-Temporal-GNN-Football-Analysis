@@ -81,17 +81,17 @@ class TestGetObjectTracks:
         mock_det.class_id = np.array([2])
         mock_det.tracker_id = np.array([1])
         mock_det.confidence = np.array([0.9])
-        mock_tracker.byte_tracker.update_with_detections.return_value = mock_det
-        
+        mock_tracker.tracker.update_with_detections.return_value = mock_det
+
         with patch('trackers.tracker.sv.Detections') as mock_sv_det:
             mock_sv_det.from_ultralytics.return_value = mock_det
             mock_sv_det.empty.return_value = MagicMock()
-            
+
             tracks = mock_tracker.get_object_tracks(frames, read_from_stub=False)
-        
+
         assert isinstance(tracks, dict)
         assert "players" in tracks
-        assert "referee" in tracks
+        assert "referees" in tracks
         assert "ball" in tracks
     
     def test_get_object_tracks_stub_loading(self, mock_tracker):
@@ -103,7 +103,7 @@ class TestGetObjectTracks:
         # Create mock tracks
         mock_tracks = {
             "players": [{1: {"bbox": [10, 10, 50, 50]}}],
-            "referee": [{}],
+            "referees": [{}],
             "ball": [{1: {"bbox": [100, 100, 110, 110]}}]
         }
         
@@ -116,8 +116,11 @@ class TestGetObjectTracks:
                 read_from_stub=True,
                 stub_path=stub_path
             )
-            
-            assert tracks == mock_tracks
+
+            # Check that all expected keys are present (code adds backwards compat "referee" alias)
+            assert tracks["players"] == mock_tracks["players"]
+            assert tracks["ball"] == mock_tracks["ball"]
+            assert tracks["referees"] == mock_tracks["referees"]
         finally:
             os.remove(stub_path)
             os.rmdir(temp_dir)
@@ -141,7 +144,7 @@ class TestGetObjectTracks:
         mock_det.class_id = np.array([])
         mock_det.tracker_id = np.array([])
         mock_det.confidence = np.array([])
-        mock_tracker.byte_tracker.update_with_detections.return_value = mock_det
+        mock_tracker.tracker.update_with_detections.return_value = mock_det
         
         # Use temp directory instead of /nonexistent
         temp_dir = tempfile.mkdtemp()
@@ -222,7 +225,7 @@ class TestDrawAnnotations:
         """Test that draw_annotations returns list of frames."""
         # Create sample frames
         frames = [np.zeros((200, 200, 3), dtype=np.uint8) for _ in range(3)]
-        
+
         # Create sample tracks
         tracks = {
             "players": [
@@ -230,34 +233,40 @@ class TestDrawAnnotations:
                 {1: {"bbox": [55, 55, 105, 155]}},
                 {1: {"bbox": [60, 60, 110, 160]}}
             ],
-            "referee": [{}, {}, {}],
+            "referees": [{}, {}, {}],
             "ball": [
                 {1: {"bbox": [100, 100, 110, 110]}},
                 {1: {"bbox": [105, 105, 115, 115]}},
                 {1: {"bbox": [110, 110, 120, 120]}}
             ]
         }
-        
+
+        # Create team_ball_control array
+        team_ball_control = np.array([None] * len(frames))
+
         with patch.object(mock_tracker, 'draw_ellipse', return_value=frames[0]), \
-             patch.object(mock_tracker, 'draw_triangle', return_value=frames[0]) if hasattr(mock_tracker, 'draw_triangle') else patch('builtins.print'):
-            
-            result = mock_tracker.draw_annotations(frames, tracks)
-        
+             patch.object(mock_tracker, 'draw_ball_marker', return_value=frames[0]) if hasattr(mock_tracker, 'draw_ball_marker') else patch('builtins.print'):
+
+            result = mock_tracker.draw_annotations(frames, tracks, team_ball_control)
+
         assert isinstance(result, list)
         assert len(result) == len(frames)
     
     def test_draw_annotations_preserves_frame_shape(self, mock_tracker):
         """Test that annotated frames have same shape as input."""
         frames = [np.zeros((480, 640, 3), dtype=np.uint8)]
-        
+
         tracks = {
             "players": [{}],
-            "referee": [{}],
+            "referees": [{}],
             "ball": [{}]
         }
-        
-        result = mock_tracker.draw_annotations(frames, tracks)
-        
+
+        # Create team_ball_control array
+        team_ball_control = np.array([None] * len(frames))
+
+        result = mock_tracker.draw_annotations(frames, tracks, team_ball_control)
+
         assert result[0].shape == frames[0].shape
 
 

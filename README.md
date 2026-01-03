@@ -1,11 +1,10 @@
 # Football Video Analysis Pipeline
 
-YOLO detection → ByteTrack tracking → K-means team assignment → Annotated video output.
+YOLO detection → ByteTrack tracking → Kalman ball tracking → Role stabilization → K-means team assignment → Ball possession → Annotated output.
 
 ```
-Input Video → [Detection] → [Tracking] → [Team Assignment] → Output Video
-                 88.4%        100%           2 teams
-               ball rate    player frames    auto-assigned
+Input Video → [Detection] → [Tracking] → [Ball Tracking] → [Team Assignment] → [Possession] → Output Video
+                YOLO v8      ByteTrack     Kalman Filter     K-means HSV        Hysteresis
 ```
 
 ---
@@ -15,32 +14,50 @@ Input Video → [Detection] → [Tracking] → [Team Assignment] → Output Vide
 ```
 football_analysis/
 ├── src/
-│   ├── main.py                 # Entry point
+│   ├── main.py                     # Entry point
 │   ├── trackers/
-│   │   └── tracker.py          # YOLO + ByteTrack
+│   │   ├── tracker.py              # YOLO + ByteTrack + visualization
+│   │   ├── single_ball_tracker.py  # Kalman filter ball tracking
+│   │   └── track_stabilizer.py     # Role locking (majority voting)
 │   ├── team_assigner/
-│   │   └── team_assigner.py    # K-means clustering
+│   │   └── team_assigner.py        # K-means clustering on jersey HSV
+│   ├── player_ball_assigner/
+│   │   └── player_ball_assigner.py # Ball possession (hysteresis-based)
 │   ├── utils/
-│   │   ├── video_utils.py      # read/save video
-│   │   └── bbox_utils.py       # bbox helpers
+│   │   ├── video_utils.py          # read/save video
+│   │   └── bbox_utils.py           # bbox helpers
 │   ├── models/
-│   │   └── best.pt             # YOLO weights (195MB)
+│   │   └── best.pt                 # YOLO weights (195MB)
 │   ├── stubs/
-│   │   └── track_stubs.pkl     # Cached detections
-│   ├── input_videos/           # Your videos here
-│   └── output_videos/          # Annotated output
-├── tests/
-│   ├── conftest.py             # Shared fixtures
+│   │   └── track_stubs.pkl         # Cached detections
+│   ├── input_videos/               # Your videos here
+│   └── output_videos/              # Annotated output
+├── tests/                          # 74 tests
+│   ├── conftest.py
 │   ├── test_tracker.py
 │   ├── test_team_assigner.py
+│   ├── test_single_ball_tracker.py
 │   ├── test_video_utils.py
 │   ├── test_bbox_utils.py
 │   ├── test_main.py
-│   └── run_tests.sh            # Test runner
+│   └── run_tests.sh
 ├── pytest.ini
 ├── requirements.txt
 └── README.md
 ```
+
+---
+
+## Pipeline
+
+1. **Detection** - YOLO v8 (conf=0.15, imgsz=1280)
+2. **Tracking** - ByteTrack for players/referees
+3. **Ball Tracking** - Kalman filter with lock/unlock state machine
+4. **Ball Smoothing** - Cubic spline interpolation + Gaussian smoothing
+5. **Role Stabilization** - Majority voting to fix referee flickering
+6. **Team Assignment** - K-means clustering on jersey HSV colours
+7. **Ball Possession** - Hysteresis-based assignment (resolution-independent)
+8. **Visualization** - Modern minimalist annotations
 
 ---
 
@@ -64,7 +81,7 @@ python main.py
 ## Testing
 
 ```bash
-# Run all tests (51 tests)
+# Run all tests (74 tests)
 ./tests/run_tests.sh
 
 # Or manually
@@ -78,6 +95,33 @@ python -m pytest tests/ -v
 | tracker | 12 |
 | team_assigner | 10 |
 | main | 12 |
+| single_ball_tracker | 23 |
+
+---
+
+## Key Features
+
+### Kalman Ball Tracker
+- Lock/unlock state machine for robust tracking
+- Velocity prediction during occlusions
+- Confidence-based detection filtering
+- Automatic re-acquisition after lost frames
+
+### Role Stabilization
+- Majority voting across all frames
+- Fixes referee flickering (player ↔ referee misclassification)
+- Runs BEFORE team assignment to prevent contamination
+
+### Hysteresis Ball Possession
+- Resolution-independent threshold (`player_height * 0.5`)
+- 30% closer required to switch possession (prevents flickering)
+- Temporal smoothing for stable assignments
+
+### Modern UI
+- Team-colored possession glow
+- Minimalist chevron indicator
+- Semi-transparent possession stats panel
+- Anti-aliased rendering throughout
 
 ---
 
@@ -89,27 +133,22 @@ python -m pytest tests/ -v
 1280px → ball = 22px → detectable ✓
 ```
 
-### Why class-specific confidence?
-```python
-# Ball is small → YOLO gives low confidence (0.01-0.10)
-# Players are large → high confidence (0.70-0.95)
-
-conf = 0.01  # Detect everything
-# Then filter:
-if class == "ball" and conf >= 0.01: keep
-if class == "player" and conf >= 0.10: keep
+### Why conf=0.15?
+```
+0.10 → NMS overload on crowded frames (2s+ timeout)
+0.15 → Fast NMS, still catches all detections ✓
 ```
 
-### Why single-frame inference?
+### Why single-frame inference on MPS?
 ```
-Batch processing on MPS → frames 3+ empty (bug)
+Batch processing on MPS → frames 3+ empty (Apple Silicon bug)
 Single-frame processing → 100% frames correct ✓
 ```
 
-### Why manual filtering over two models?
+### Why hysteresis for possession?
 ```
-Two YOLO models     → 2x inference time
-Manual filtering    → same speed, simpler code ✓
+Without: Possession flickers between nearby players
+With: Stable possession, 30% closer required to switch ✓
 ```
 
 ---
@@ -118,17 +157,19 @@ Manual filtering    → same speed, simpler code ✓
 
 ```python
 # src/trackers/tracker.py
-
-results = self.model.predict(
-    source=frame,
-    conf=0.01,      # Low to catch balls
-    imgsz=1280,     # Match training resolution
-    max_det=50,     # Football has ~25 objects max
-    verbose=False
+Tracker(
+    model_path="models/best.pt",
+    det_conf_player=0.15,  # Detection confidence
+    det_conf_ref=0.15,
+    imgsz=1280,            # Match training resolution
+    max_det=50,            # Football has ~25 objects max
 )
 
-# FP16 for speed
-self.model.model.half()
+# src/player_ball_assigner/player_ball_assigner.py
+PlayerBallAssigner(
+    distance_ratio=0.5,    # max_distance = player_height * 0.5
+    hysteresis=0.3,        # 30% closer required to switch
+)
 ```
 
 ---
@@ -137,10 +178,11 @@ self.model.model.half()
 
 | Metric | Value |
 |--------|-------|
-| Ball detection | 88.4% (663/750 frames) |
-| Player tracking | 100% (750/750 frames) |
-| Referee tracking | 99.6% (747/750 frames) |
-| Avg players/frame | 20.7 |
+| Ball detection | ~80% (before interpolation) |
+| Ball coverage | 100% (after interpolation) |
+| Player tracking | 100% |
+| Referee tracking | ~99% |
+| Team assignment | 2 teams auto-detected |
 
 ---
 
@@ -174,6 +216,7 @@ ultralytics==8.3.223
 supervision==0.18.0
 pandas==2.2.0
 scikit-learn==1.4.0
+scipy
 ```
 
 ---
@@ -184,8 +227,10 @@ scikit-learn==1.4.0
 |---------|----------|
 | `No module named cv2` | `pip install opencv-python` |
 | `No module named pytest` | `pip install pytest pytest-mock` |
-| Low ball detection | Check `conf=0.01` and `imgsz=1280` |
+| NMS time limit warning | Already fixed (conf=0.15) |
+| Low ball detection | Check imgsz=1280 |
 | MPS errors | Set `PYTORCH_ENABLE_MPS_FALLBACK=1` |
+| Possession flickering | Already fixed (hysteresis) |
 
 ---
 
