@@ -1,0 +1,17 @@
+--index-url https://download.pytorch.org/whl/cu121
+
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+
+ultralytics==8.3.223
+supervision==0.27.0
+transformers==4.57.3
+umap-learn==0.5.7
+scikit-learn==1.7.2
+scipy==1.14.1
+numpy==1.26.4
+opencv-python-headless==4.9.0.80
+filterpy==1.4.5
+tqdm==4.67.1
+gdown==5.2.0
