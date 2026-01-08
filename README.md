@@ -98,20 +98,43 @@ Output: `src/output_videos/<clip>/<clip>_<mode>.mp4`
 
 ## Colab Quick Start
 
+Open `colab.ipynb` in Colab and run all cells, or use the commands below.
+
 ```bash
-!git clone <your-repo-url>
+!git clone https://github.com/esharif20/Spatio-Temporal-GNN-Football-Analysis.git
 %cd football_analysis
-!pip install -r requirements.txt
-!pip install gdown
-!bash src/setup.sh   # optional: pull sample models/videos into src/data
+!bash colab_setup.sh   # installs Colab deps + pulls sample assets into src/input_videos
+!ls -1 src/input_videos | sed -n '1,200p'
+```
+
+One-liner bootstrap (downloads the script, clones the repo, installs deps):
+
+```bash
+!REPO_URL=https://github.com/esharif20/Spatio-Temporal-GNN-Football-Analysis.git \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/esharif20/Spatio-Temporal-GNN-Football-Analysis/main/colab_setup.sh)"
+```
+
+To skip sample downloads (if you have your own clips), run:
+
+```bash
+!SKIP_ASSETS=1 bash colab_setup.sh
+```
+
+To avoid slow uploads, you can fetch a clip via `gdown` or Google Drive:
+
+```bash
+!gdown -O src/input_videos/custom.mp4 "https://drive.google.com/uc?id=YOUR_FILE_ID"
+!DEVICE=cuda bash src/run.sh all custom --fresh
 ```
 
 Run with CUDA:
 
 ```bash
-!DEVICE=cuda bash src/run.sh all Test6 --fresh
-!DEVICE=cuda bash src/run.sh ball Test6 --fresh --ball-conf 0.12 --ball-slice 768 --ball-overlap 128
+!DEVICE=cuda bash src/run.sh all 0bfacc_0 --fresh
+!DEVICE=cuda bash src/run.sh ball 0bfacc_0 --fresh --ball-conf 0.12 --ball-slice 768 --ball-overlap 128
 ```
+
+`src/run.sh` accepts either a base clip name (looks in `src/input_videos/<clip>.mp4`) or a full path.
 
 Default outputs are written to:
 
@@ -122,13 +145,13 @@ src/output_videos/<clip>/<clip>_<mode>.mp4
 Example:
 
 ```
-src/output_videos/Test6/Test6_ALL.mp4
+src/output_videos/0bfacc_0/0bfacc_0_ALL.mp4
 ```
 
 To save somewhere else:
 
 ```bash
-!DEVICE=cuda bash src/run.sh ball Test6 /content/Test6_ball.mp4 --fresh
+!DEVICE=cuda bash src/run.sh ball 0bfacc_0 /content/0bfacc_0_ball.mp4 --fresh
 ```
 
 Quick preview or download:
