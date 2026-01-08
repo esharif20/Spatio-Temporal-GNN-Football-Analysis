@@ -36,6 +36,7 @@ def load_frames(source_video_path: str) -> List[np.ndarray]:
 
 
 def build_tracker(
+    device: str | None,
     use_ball_model: bool,
     fast_ball: bool,
     ball_slice_wh: int,
@@ -60,6 +61,7 @@ def build_tracker(
     """Build tracker with configuration.
 
     Args:
+        device: Device for inference (cpu, cuda, mps)
         use_ball_model: Whether to use dedicated ball model
         ... (other ball tracking parameters)
 
@@ -97,7 +99,7 @@ def build_tracker(
         ball_area_ratio_max=ball_area_ratio_max,
         ball_max_jump_ratio=ball_max_jump_ratio,
     )
-    tracker = Tracker(model_path=str(PLAYER_DETECTION_MODEL_PATH), config=config)
+    tracker = Tracker(model_path=str(PLAYER_DETECTION_MODEL_PATH), config=config, device=device)
 
     if use_ball_model:
         if ball_model_path is None:

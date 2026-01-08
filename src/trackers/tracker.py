@@ -86,10 +86,11 @@ class Tracker:
         self,
         model_path: str,
         config: Optional["Tracker.Config"] = None,
+        device: Optional[str] = None,
     ) -> None:
         cfg = config or self.Config()
         self.model = YOLO(model_path)
-        self._select_device(self.model)
+        self._select_device(self.model, device)
 
         self.class_names = self._normalize_class_names(self.model.names)
 
@@ -129,7 +130,7 @@ class Tracker:
         self.ball_slicer = None
         if cfg.ball_model_path:
             self.ball_model = YOLO(cfg.ball_model_path)
-            self._select_device(self.ball_model)
+            self._select_device(self.ball_model, device)
             self.ball_model_names = self._normalize_class_names(self.ball_model.names)
             self.ball_model_class_id = self._resolve_class_id(
                 self.ball_model_names, ["ball", "football"]
@@ -194,13 +195,18 @@ class Tracker:
         print(f"Model loaded on: {self.model.device}")
         print(f"Model classes: {self.class_names}")
 
-    def _select_device(self, model: YOLO) -> None:
+    def _select_device(self, model: YOLO, device: Optional[str] = None) -> None:
         try:
             import torch
         except Exception:
             return
 
-        if torch.backends.mps.is_available():
+        if device:
+            model.to(device)
+            return
+        if torch.cuda.is_available():
+            model.to("cuda")
+        elif torch.backends.mps.is_available():
             model.to("mps")
 
     @staticmethod

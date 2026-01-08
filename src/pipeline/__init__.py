@@ -67,12 +67,17 @@ def get_frame_generator(
         return run_pitch(source_video_path=source_video_path, device=device)
 
     if mode == Mode.PLAYER_DETECTION:
-        return run_players(source_video_path=source_video_path, read_from_stub=read_from_stub)
+        return run_players(
+            source_video_path=source_video_path,
+            read_from_stub=read_from_stub,
+            device=device,
+        )
 
     if mode == Mode.BALL_DETECTION:
         return run_ball(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
+            device=device,
             fast_ball=fast_ball,
             ball_slice_wh=ball_slice_wh,
             ball_overlap_wh=ball_overlap_wh,
@@ -95,12 +100,17 @@ def get_frame_generator(
         )
 
     if mode == Mode.PLAYER_TRACKING:
-        return run_tracking(source_video_path=source_video_path, read_from_stub=read_from_stub)
+        return run_tracking(
+            source_video_path=source_video_path,
+            read_from_stub=read_from_stub,
+            device=device,
+        )
 
     if mode == Mode.TEAM_CLASSIFICATION:
         return run_team(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
+            device=device,
             fast_ball=fast_ball,
             ball_slice_wh=ball_slice_wh,
             ball_overlap_wh=ball_overlap_wh,
@@ -126,6 +136,7 @@ def get_frame_generator(
         return run_full(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
+            device=device,
             fast_ball=fast_ball,
             ball_slice_wh=ball_slice_wh,
             ball_overlap_wh=ball_overlap_wh,

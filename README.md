@@ -106,6 +106,8 @@ Recommended: open `colab.ipynb` in Colab and **Run all**. It includes:
 - optional Drive mount / `gdown` download
 - safe run with CPU fallback
 
+By default, Colab's preinstalled `torch` is used to avoid large downloads. To force a pinned CUDA torch install, set `INSTALL_TORCH=True` in the notebook install cell.
+
 Manual setup (if you don't want the notebook):
 
 ```bash

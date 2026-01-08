@@ -36,6 +36,7 @@ from .base import load_frames, build_tracker, get_stub_path
 def run(
     source_video_path: str,
     read_from_stub: bool,
+    device: str,
     fast_ball: bool = False,
     ball_slice_wh: int = BALL_SLICE_WH,
     ball_overlap_wh: int = BALL_OVERLAP_WH,
@@ -61,6 +62,7 @@ def run(
     Args:
         source_video_path: Path to input video
         read_from_stub: Whether to read from cached stubs
+        device: Device for inference (cpu, cuda, mps)
         fast_ball: Disable slicer for speed
         ... (other ball tracking parameters)
 
@@ -69,6 +71,7 @@ def run(
     """
     frames = load_frames(source_video_path)
     tracker = build_tracker(
+        device=device,
         use_ball_model=True,
         fast_ball=fast_ball,
         ball_slice_wh=ball_slice_wh,
@@ -105,7 +108,7 @@ def run(
         max_crops=TEAM_MAX_CROPS,
         min_crop_size=TEAM_MIN_CROP_SIZE,
     )
-    team_assigner = TeamAssigner(config=team_cfg)
+    team_assigner = TeamAssigner(device=device, config=team_cfg)
     team_assigner.fit(frames, tracks)
     team_assigner.assign_teams(frames, tracks)
 

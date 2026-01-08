@@ -18,6 +18,17 @@ if [[ ! -f "$ROOT/requirements-colab.txt" ]]; then
 fi
 
 python -m pip install --upgrade pip
+
+torch_present=0
+if python -c "import torch" >/dev/null 2>&1; then
+  torch_present=1
+fi
+
+if [[ "${INSTALL_TORCH:-0}" == "1" || "$torch_present" -eq 0 ]]; then
+  python -m pip install --extra-index-url https://download.pytorch.org/whl/cu121 \
+    torch==2.5.1 torchvision==0.20.1
+fi
+
 python -m pip install -r "$ROOT/requirements-colab.txt"
 
 if [[ -f "$ROOT/src/run.sh" ]]; then

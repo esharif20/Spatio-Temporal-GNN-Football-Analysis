@@ -28,18 +28,20 @@ from . import Mode
 from .base import load_frames, build_tracker, get_stub_path
 
 
-def run(source_video_path: str, read_from_stub: bool) -> Iterator[np.ndarray]:
+def run(source_video_path: str, read_from_stub: bool, device: str) -> Iterator[np.ndarray]:
     """Run player tracking mode.
 
     Args:
         source_video_path: Path to input video
         read_from_stub: Whether to read from cached stubs
+        device: Device for inference (cpu, cuda, mps)
 
     Yields:
         Annotated frames with tracked players
     """
     frames = load_frames(source_video_path)
     tracker = build_tracker(
+        device=device,
         use_ball_model=False,
         fast_ball=False,
         ball_slice_wh=BALL_SLICE_WH,
