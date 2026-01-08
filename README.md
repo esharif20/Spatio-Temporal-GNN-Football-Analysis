@@ -98,7 +98,15 @@ Output: `src/output_videos/<clip>/<clip>_<mode>.mp4`
 
 ## Colab Quick Start
 
-Open `colab.ipynb` in Colab and run all cells, or use the commands below.
+Recommended: open `colab.ipynb` in Colab and **Run all**. It includes:
+
+- GPU check (`nvidia-smi`)
+- install + asset download via `colab_setup.sh`
+- sample clip listing
+- optional Drive mount / `gdown` download
+- safe run with CPU fallback
+
+Manual setup (if you don't want the notebook):
 
 ```bash
 !git clone https://github.com/esharif20/Spatio-Temporal-GNN-Football-Analysis.git
@@ -107,20 +115,20 @@ Open `colab.ipynb` in Colab and run all cells, or use the commands below.
 !ls -1 src/input_videos | sed -n '1,200p'
 ```
 
-One-liner bootstrap (downloads the script, clones the repo, installs deps):
+One-line bootstrap (downloads the script, clones repo, installs deps):
 
 ```bash
 !REPO_URL=https://github.com/esharif20/Spatio-Temporal-GNN-Football-Analysis.git \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/esharif20/Spatio-Temporal-GNN-Football-Analysis/main/colab_setup.sh)"
 ```
 
-To skip sample downloads (if you have your own clips), run:
+Skip sample downloads (if you have your own clips):
 
 ```bash
 !SKIP_ASSETS=1 bash colab_setup.sh
 ```
 
-To avoid slow uploads, you can fetch a clip via `gdown` or Google Drive:
+Avoid slow uploads (download via Drive file id):
 
 ```bash
 !gdown -O src/input_videos/custom.mp4 "https://drive.google.com/uc?id=YOUR_FILE_ID"

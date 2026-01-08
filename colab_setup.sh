@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_URL="${REPO_URL:-}"
 REPO_DIR="${REPO_DIR:-/content/football_analysis}"
+CACHE_ROOT="${FA_CACHE_ROOT:-}"
 
 if [[ ! -f "$ROOT/requirements-colab.txt" ]]; then
   if [[ -n "$REPO_URL" ]]; then
@@ -17,13 +18,29 @@ if [[ ! -f "$ROOT/requirements-colab.txt" ]]; then
 fi
 
 python -m pip install --upgrade pip
-python -m pip install --no-cache-dir -r "$ROOT/requirements-colab.txt"
+python -m pip install -r "$ROOT/requirements-colab.txt"
 
 if [[ -f "$ROOT/src/run.sh" ]]; then
   chmod +x "$ROOT/src/run.sh"
 fi
 if [[ -f "$ROOT/src/setup.sh" ]]; then
   chmod +x "$ROOT/src/setup.sh"
+fi
+
+if [[ -n "$CACHE_ROOT" ]]; then
+  mkdir -p "$CACHE_ROOT"/{data,input_videos,models}
+  if compgen -G "$CACHE_ROOT/data/*.pt" > /dev/null; then
+    mkdir -p "$ROOT/src/data"
+    cp -n "$CACHE_ROOT"/data/*.pt "$ROOT/src/data"/
+  fi
+  if compgen -G "$CACHE_ROOT/input_videos/*.mp4" > /dev/null; then
+    mkdir -p "$ROOT/src/input_videos"
+    cp -n "$CACHE_ROOT"/input_videos/*.mp4 "$ROOT/src/input_videos"/
+  fi
+  if compgen -G "$CACHE_ROOT/models/*.pt" > /dev/null; then
+    mkdir -p "$ROOT/src/models"
+    cp -n "$CACHE_ROOT"/models/*.pt "$ROOT/src/models"/
+  fi
 fi
 
 if [[ "${SKIP_ASSETS:-0}" != "1" ]]; then
@@ -38,6 +55,24 @@ mkdir -p "$ROOT/src/input_videos" "$ROOT/src/output_videos" "$ROOT/src/stubs"
 
 if compgen -G "$ROOT/src/data/*.mp4" > /dev/null; then
   cp -n "$ROOT"/src/data/*.mp4 "$ROOT/src/input_videos"/
+fi
+
+if [[ -f "$ROOT/src/data/football-player-detection.pt" ]]; then
+  mkdir -p "$ROOT/src/models"
+  cp -n "$ROOT/src/data/football-player-detection.pt" "$ROOT/src/models/best.pt"
+fi
+
+if [[ -n "$CACHE_ROOT" ]]; then
+  mkdir -p "$CACHE_ROOT"/{data,input_videos,models}
+  if compgen -G "$ROOT/src/data/*.pt" > /dev/null; then
+    cp -n "$ROOT"/src/data/*.pt "$CACHE_ROOT/data"/
+  fi
+  if compgen -G "$ROOT/src/input_videos/*.mp4" > /dev/null; then
+    cp -n "$ROOT"/src/input_videos/*.mp4 "$CACHE_ROOT/input_videos"/
+  fi
+  if [[ -f "$ROOT/src/models/best.pt" ]]; then
+    cp -n "$ROOT/src/models/best.pt" "$CACHE_ROOT/models"/
+  fi
 fi
 
 echo "Available clips:"
