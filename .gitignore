@@ -24,12 +24,14 @@ env/
 # --- Editors and IDEs ---
 .vscode/
 .idea/
+.claude/
 
 # --- Logs and temp ---
 *.log
 logs/
 tmp/
 temp/
+.tmp/
 
 # --- Outputs and runs ---
 runs/
@@ -74,6 +76,8 @@ datasets/
 *.csv
 *.parquet
 *.pt
+*.pkl
+*.pickle
 
 # --- Ultralytics/YOLO artefacts ---
 ultralytics/
@@ -81,9 +85,11 @@ ultralytics/
 
 # --- Notebooks’ auto-saves ---
 *.ipynb~*
+*.ipynb
 
 # --- Mac quarantine attribute files ---
 ._*
 __pycache__/
 *.pyc
 src/runs/
+.env

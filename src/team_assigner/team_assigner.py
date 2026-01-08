@@ -1,311 +1,286 @@
 """
-Generalizable team assignment using K-means clustering on multi-frame HSV samples.
-Works for ANY two distinct jersey colours (not just green vs white).
+Tutorial-style team assignment using SigLIP embeddings + UMAP + KMeans.
+
+This follows the full_pipeline.ipynb approach:
+- collect player crops with a frame stride
+- fit a TeamClassifier on all crops
+- assign a team per track by majority vote
+- assign goalkeepers by distance to team centroids
 """
 
-import cv2
+from dataclasses import dataclass
+from typing import Dict, Generator, Iterable, List, Optional, Tuple, TypeVar
+
 import numpy as np
+import supervision as sv
+import torch
+import umap
 from sklearn.cluster import KMeans
-from collections import defaultdict
+from tqdm import tqdm
+from transformers import AutoProcessor, SiglipVisionModel
+
+V = TypeVar("V")
+
+SIGLIP_MODEL_PATH = "google/siglip-base-patch16-224"
+
+
+def create_batches(sequence: Iterable[V], batch_size: int) -> Generator[List[V], None, None]:
+    """Generate batches from a sequence with a specified batch size."""
+    batch_size = max(batch_size, 1)
+    current_batch: List[V] = []
+    for element in sequence:
+        if len(current_batch) == batch_size:
+            yield current_batch
+            current_batch = []
+        current_batch.append(element)
+    if current_batch:
+        yield current_batch
+
+
+class TeamClassifier:
+    """
+    A classifier that uses a pre-trained SigLIP model for feature extraction,
+    UMAP for dimensionality reduction, and KMeans for clustering.
+    """
+
+    def __init__(self, device: Optional[str] = None, batch_size: int = 32) -> None:
+        self.device = self._resolve_device(device)
+        self.batch_size = batch_size
+        self.features_model = SiglipVisionModel.from_pretrained(SIGLIP_MODEL_PATH).to(self.device)
+        self.processor = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH, use_fast=True)
+        self.reducer = umap.UMAP(n_components=3)
+        self.cluster_model = KMeans(n_clusters=2)
+
+    @staticmethod
+    def _resolve_device(device: Optional[str]) -> str:
+        if device:
+            return device
+        if torch.backends.mps.is_available():
+            return "mps"
+        if torch.cuda.is_available():
+            return "cuda"
+        return "cpu"
+
+    def extract_features(self, crops: List[np.ndarray]) -> np.ndarray:
+        if len(crops) == 0:
+            return np.empty((0, 0), dtype=np.float32)
+
+        crops = [sv.cv2_to_pillow(crop) for crop in crops]
+        batches = create_batches(crops, self.batch_size)
+        data = []
+        with torch.no_grad():
+            for batch in tqdm(batches, desc="Embedding extraction"):
+                inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
+                outputs = self.features_model(**inputs)
+                embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
+                data.append(embeddings)
+
+        return np.concatenate(data)
+
+    def fit(self, crops: List[np.ndarray]) -> None:
+        if len(crops) == 0:
+            raise ValueError("No crops provided for team classifier training.")
+
+        data = self.extract_features(crops)
+        projections = self.reducer.fit_transform(data)
+        self.cluster_model.fit(projections)
+
+    def predict(self, crops: List[np.ndarray]) -> np.ndarray:
+        if len(crops) == 0:
+            return np.array([])
+
+        data = self.extract_features(crops)
+        projections = self.reducer.transform(data)
+        return self.cluster_model.predict(projections)
+
+
+def resolve_goalkeepers_team_id(
+    players: sv.Detections,
+    goalkeepers: sv.Detections,
+) -> np.ndarray:
+    goalkeepers_xy = goalkeepers.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+    players_xy = players.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+    team_0_centroid = players_xy[players.class_id == 0].mean(axis=0)
+    team_1_centroid = players_xy[players.class_id == 1].mean(axis=0)
+    goalkeepers_team_id = []
+    for goalkeeper_xy in goalkeepers_xy:
+        dist_0 = np.linalg.norm(goalkeeper_xy - team_0_centroid)
+        dist_1 = np.linalg.norm(goalkeeper_xy - team_1_centroid)
+        goalkeepers_team_id.append(0 if dist_0 < dist_1 else 1)
+
+    return np.array(goalkeepers_team_id)
+
+
+@dataclass
+class TeamAssignerConfig:
+    stride: int = 30
+    batch_size: int = 32
+    max_crops: int = 2000
+    min_crop_size: Tuple[int, int] = (10, 6)
 
 
 class TeamAssigner:
-    """
-    Assigns players to teams using multi-frame colour sampling + K-means clustering.
-    
-    Generalizable approach:
-    1. Collect HSV samples from multiple frames per player
-    2. Cluster ALL samples into 2 groups using K-means
-    3. Assign each player to cluster based on their median sample
-    
-    Works for any two distinct jersey colours.
-    """
-    
-    def __init__(self):
-        self.player_team_dict = {}
-        self.goalkeeper_ids = set()
-        self.frame_width = 1920
-        
-        # Store colour samples per player
-        self.player_colour_samples = defaultdict(list)
-        
-        # K-means model fitted on all player colours
-        self.kmeans = None
-        self.cluster_centers = {}
+    """Tutorial-style team assignment wrapper for the pipeline."""
 
-    def get_player_colour_hsv(self, frame, bbox):
-        """
-        Extract HSV values from player's jersey area.
-        Returns (H, S, V) tuple or None.
-        """
-        x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-        
+    def __init__(self, device: Optional[str] = None, config: Optional[TeamAssignerConfig] = None) -> None:
+        self.config = config or TeamAssignerConfig()
+        self.classifier = TeamClassifier(device=device, batch_size=self.config.batch_size)
+        self.track_team: Dict[int, int] = {}
+        self.team_colors_bgr: Dict[int, Tuple[int, int, int]] = {}
+
+    def _crop(self, frame: np.ndarray, bbox: List[float]) -> Optional[np.ndarray]:
+        x1, y1, x2, y2 = [int(v) for v in bbox]
         h, w = frame.shape[:2]
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w, x2), min(h, y2)
-        
         if x2 <= x1 or y2 <= y1:
             return None
-        
-        image = frame[y1:y2, x1:x2]
-        
-        if image.size == 0 or image.shape[0] < 10 or image.shape[1] < 6:
+        crop = frame[y1:y2, x1:x2]
+        min_h, min_w = self.config.min_crop_size
+        if crop.shape[0] < min_h or crop.shape[1] < min_w:
             return None
-        
-        # Use top half (jersey area)
-        top_half = image[0:int(image.shape[0] // 2), :]
-        
-        if top_half.size == 0:
-            return None
-        
-        # Convert to HSV
-        hsv = cv2.cvtColor(top_half, cv2.COLOR_BGR2HSV)
-        
-        # Use K-means to find dominant colour (exclude background)
-        pixels = hsv.reshape(-1, 3).astype(np.float32)
-        
-        if len(pixels) < 10:
-            return None
-        
-        # Cluster into 2: background and jersey
-        kmeans = KMeans(n_clusters=2, init="k-means++", n_init=5, random_state=42)
-        kmeans.fit(pixels)
-        labels = kmeans.labels_
-        
-        # Reshape to find corners (background)
-        label_img = labels.reshape(top_half.shape[0], top_half.shape[1])
-        corners = [
-            label_img[0, 0],
-            label_img[0, -1],
-            label_img[-1, 0],
-            label_img[-1, -1]
-        ]
-        bg_cluster = max(set(corners), key=corners.count)
-        jersey_cluster = 1 - bg_cluster
-        
-        # Get jersey HSV
-        jersey_hsv = kmeans.cluster_centers_[jersey_cluster]
-        return tuple(jersey_hsv)
+        return crop
 
-    def _is_dark(self, hsv):
-        """Check if colour is very dark (goalkeeper or referee)."""
-        if hsv is None:
-            return True
-        h, s, v = hsv
-        return v < 80
+    def _collect_crops_by_track(self, frames: List[np.ndarray], tracks: dict) -> Dict[int, List[np.ndarray]]:
+        crops_by_id: Dict[int, List[np.ndarray]] = {}
+        stride = max(1, int(self.config.stride))
+        total_crops = 0
 
-    def _is_referee_colour(self, hsv):
-        """Check if colour is likely referee (black kit)."""
-        if hsv is None:
-            return False
-        h, s, v = hsv
-        # Black: low saturation AND low value
-        return s < 50 and v < 100
-
-    def identify_goalkeepers(self, tracks, frame_width):
-        """Identify goalkeepers by extreme positions."""
-        self.frame_width = frame_width
-        print("\n=== Identifying Goalkeepers ===")
-        
-        player_positions = {}
-        for frame_track in tracks["players"]:
-            for pid, player in frame_track.items():
-                bbox = player["bbox"]
-                x_center = (bbox[0] + bbox[2]) / 2
-                if pid not in player_positions:
-                    player_positions[pid] = []
-                player_positions[pid].append(x_center)
-        
-        player_stats = []
-        for pid, positions in player_positions.items():
-            if len(positions) < 30:
-                continue
-            player_stats.append({
-                "pid": pid,
-                "avg_x": np.mean(positions),
-                "frames": len(positions)
-            })
-        
-        player_stats.sort(key=lambda x: x["avg_x"])
-        
-        if len(player_stats) < 2:
-            print("Not enough players for GK detection")
-            return
-        
-        print("Leftmost players:")
-        for p in player_stats[:3]:
-            print(f"  Player {p['pid']}: avg_x={p['avg_x']:.0f}")
-        print("Rightmost players:")
-        for p in player_stats[-3:]:
-            print(f"  Player {p['pid']}: avg_x={p['avg_x']:.0f}")
-        
-        # Use relative thresholds based on player spread
-        all_x = [p["avg_x"] for p in player_stats]
-        min_x, max_x = min(all_x), max(all_x)
-        spread = max_x - min_x
-        
-        left_threshold = min_x + spread * 0.15
-        right_threshold = max_x - spread * 0.15
-        
-        for p in player_stats:
-            if p["avg_x"] < left_threshold:
-                self.goalkeeper_ids.add(p["pid"])
-                print(f"LEFT GK: Player {p['pid']}")
-                break
-        
-        for p in reversed(player_stats):
-            if p["avg_x"] > right_threshold:
-                self.goalkeeper_ids.add(p["pid"])
-                print(f"RIGHT GK: Player {p['pid']}")
-                break
-        
-        print(f"Goalkeeper IDs: {self.goalkeeper_ids}")
-
-    def collect_colour_samples(self, frames, tracks):
-        """
-        Collect HSV colour samples from multiple frames per player.
-        This ensures reliable team assignment.
-        """
-        print("\n=== Collecting Colour Samples ===")
-        
-        # Sample every 10th frame
-        sample_indices = list(range(0, len(frames), 10))
-        
-        for frame_idx in sample_indices:
+        for frame_idx in range(0, len(frames), stride):
             frame = frames[frame_idx]
-            for pid, player in tracks["players"][frame_idx].items():
-                if pid in self.goalkeeper_ids:
+            for pid, info in tracks["players"][frame_idx].items():
+                crop = self._crop(frame, info["bbox"])
+                if crop is None:
                     continue
-                
-                hsv = self.get_player_colour_hsv(frame, player["bbox"])
-                if hsv is None:
-                    continue
-                
-                h, s, v = hsv
-                
-                # Skip dark (referee/GK)
-                if v < 80:
-                    continue
-                
-                # Store full HSV for clustering
-                self.player_colour_samples[pid].append(hsv)
-        
-        print(f"Collected samples for {len(self.player_colour_samples)} players")
+                crops_by_id.setdefault(pid, []).append(crop)
+                total_crops += 1
+                if self.config.max_crops > 0 and total_crops >= self.config.max_crops:
+                    return crops_by_id
 
-    def assign_teams_by_clustering(self):
-        """
-        Assign teams using K-means clustering on all colour samples.
-        
-        This is GENERALIZABLE - works for any two distinct jersey colours:
-        - Green vs White
-        - Red vs Blue  
-        - Yellow vs Black
-        - etc.
-        """
-        print("\n=== Clustering Player Colours ===")
-        
-        # Collect all samples with player IDs
-        all_samples = []
-        sample_to_player = []
-        
-        for pid, samples in self.player_colour_samples.items():
-            for sample in samples:
-                all_samples.append(sample)
-                sample_to_player.append(pid)
-        
-        if len(all_samples) < 4:
-            print("WARNING: Not enough samples for clustering")
-            return
-        
-        all_samples = np.array(all_samples, dtype=np.float64)
-        
-        # Cluster into 2 teams
-        self.kmeans = KMeans(n_clusters=2, init="k-means++", n_init=10, random_state=42)
-        self.kmeans.fit(all_samples)
-        
-        self.cluster_centers[1] = self.kmeans.cluster_centers_[0]
-        self.cluster_centers[2] = self.kmeans.cluster_centers_[1]
-        
-        print(f"Cluster 1 (Team 1): H={self.cluster_centers[1][0]:.0f}, S={self.cluster_centers[1][1]:.0f}, V={self.cluster_centers[1][2]:.0f}")
-        print(f"Cluster 2 (Team 2): H={self.cluster_centers[2][0]:.0f}, S={self.cluster_centers[2][1]:.0f}, V={self.cluster_centers[2][2]:.0f}")
-        
-        # Assign each player based on MEDIAN of their samples
-        print("\nAssigning players by median colour:")
-        
-        for pid, samples in self.player_colour_samples.items():
+        return crops_by_id
+
+    @staticmethod
+    def _flatten_crops(crops_by_id: Dict[int, List[np.ndarray]]) -> Tuple[List[np.ndarray], List[int]]:
+        crops: List[np.ndarray] = []
+        owners: List[int] = []
+        for pid, track_crops in crops_by_id.items():
+            for crop in track_crops:
+                crops.append(crop)
+                owners.append(pid)
+        return crops, owners
+
+    @staticmethod
+    def _mean_crop_bgr(crop: np.ndarray) -> np.ndarray:
+        h, w = crop.shape[:2]
+        y1, y2 = int(h * 0.2), int(h * 0.6)
+        x1, x2 = int(w * 0.2), int(w * 0.8)
+        region = crop[y1:y2, x1:x2]
+        if region.size == 0:
+            region = crop
+        return region.reshape(-1, 3).mean(axis=0)
+
+    def _compute_team_colors(
+        self,
+        crops_by_id: Dict[int, List[np.ndarray]],
+        track_team: Dict[int, int],
+    ) -> Dict[int, Tuple[int, int, int]]:
+        colors_by_team: Dict[int, List[np.ndarray]] = {0: [], 1: []}
+        for pid, crops in crops_by_id.items():
+            team_id = track_team.get(pid)
+            if team_id is None:
+                continue
+            for crop in crops:
+                colors_by_team[int(team_id)].append(self._mean_crop_bgr(crop))
+
+        team_colors = {}
+        for team_id, samples in colors_by_team.items():
             if len(samples) == 0:
                 continue
-            
-            # Calculate median HSV
-            samples_arr = np.array(samples, dtype=np.float64)
-            median_hsv = np.median(samples_arr, axis=0)
-            
-            # Predict cluster
-            cluster = self.kmeans.predict(median_hsv.astype(np.float64).reshape(1, -1))[0]
-            team = cluster + 1  # 0-indexed to 1-indexed
-            
-            self.player_team_dict[pid] = team
-            
-            print(f"  Player {pid}: median HSV=({median_hsv[0]:.0f}, {median_hsv[1]:.0f}, {median_hsv[2]:.0f}) → Team {team}")
-        
-        # Count teams
-        team_counts = {1: 0, 2: 0}
-        for pid, team in self.player_team_dict.items():
-            team_counts[team] = team_counts.get(team, 0) + 1
-        
-        print(f"\nTeam 1: {team_counts[1]} players")
-        print(f"Team 2: {team_counts[2]} players")
+            median_color = np.median(np.vstack(samples), axis=0)
+            team_colors[int(team_id)] = (int(median_color[0]), int(median_color[1]), int(median_color[2]))
 
-    def assign_goalkeeper_teams(self, tracks):
-        """Assign goalkeepers to teams based on pitch side."""
-        if not self.goalkeeper_ids:
-            return
-        
-        print("\n=== Assigning Goalkeeper Teams ===")
-        
-        # Calculate team centroids
-        team_positions = {1: [], 2: []}
-        
-        for frame_idx in range(0, len(tracks["players"]), 10):
-            for pid, player in tracks["players"][frame_idx].items():
-                if pid in self.goalkeeper_ids:
+        self.team_colors_bgr = team_colors
+        return team_colors
+
+    @staticmethod
+    def _detections_from_tracks(
+        frame_tracks: Dict[int, dict],
+        class_from_team: bool,
+    ) -> sv.Detections:
+        boxes = []
+        confs = []
+        class_ids = []
+
+        for _, info in frame_tracks.items():
+            if class_from_team:
+                team_id = info.get("team_id")
+                if team_id not in (0, 1):
                     continue
-                if pid not in self.player_team_dict:
-                    continue
-                
-                team = self.player_team_dict[pid]
-                x = (player["bbox"][0] + player["bbox"][2]) / 2
-                team_positions[team].append(x)
-        
-        team_centroids = {
-            1: np.mean(team_positions[1]) if team_positions[1] else self.frame_width/2,
-            2: np.mean(team_positions[2]) if team_positions[2] else self.frame_width/2
-        }
-        
-        print(f"Team centroids: Team1={team_centroids[1]:.0f}, Team2={team_centroids[2]:.0f}")
-        
-        for gk_id in self.goalkeeper_ids:
-            gk_positions = []
-            for frame_track in tracks["players"]:
-                if gk_id in frame_track:
-                    bbox = frame_track[gk_id]["bbox"]
-                    gk_positions.append((bbox[0] + bbox[2]) / 2)
-            
-            if not gk_positions:
-                self.player_team_dict[gk_id] = 1
-                continue
-            
-            gk_avg_x = np.mean(gk_positions)
-            
-            # GK on same side as team centroid = that team
-            if gk_avg_x < self.frame_width / 2:
-                team = 1 if team_centroids[1] < team_centroids[2] else 2
+                class_ids.append(int(team_id))
             else:
-                team = 1 if team_centroids[1] > team_centroids[2] else 2
-            
-            self.player_team_dict[gk_id] = team
-            print(f"Goalkeeper {gk_id} (x={gk_avg_x:.0f}): Team {team}")
+                class_ids.append(0)
 
-    def get_player_team(self, player_id):
-        """Get team for a player."""
-        return self.player_team_dict.get(player_id, None)
+            boxes.append(info["bbox"])
+            confs.append(float(info.get("confidence", 1.0)))
+
+        if len(boxes) == 0:
+            return sv.Detections.empty()
+
+        return sv.Detections(
+            xyxy=np.array(boxes, dtype=np.float32),
+            confidence=np.array(confs, dtype=np.float32),
+            class_id=np.array(class_ids, dtype=np.int32),
+        )
+
+    def fit(self, frames: List[np.ndarray], tracks: dict) -> None:
+        crops_by_id = self._collect_crops_by_track(frames, tracks)
+        all_crops, owners = self._flatten_crops(crops_by_id)
+        if len(all_crops) == 0:
+            raise ValueError("No crops provided for team classifier training.")
+
+        self.classifier.fit(all_crops)
+        predictions = self.classifier.predict(all_crops)
+
+        votes: Dict[int, np.ndarray] = {}
+        for pid, pred in zip(owners, predictions):
+            votes.setdefault(pid, np.zeros(2, dtype=int))
+            votes[pid][int(pred)] += 1
+
+        self.track_team = {pid: int(np.argmax(counts)) for pid, counts in votes.items()}
+        self._compute_team_colors(crops_by_id, self.track_team)
+
+    def assign_teams(self, frames: List[np.ndarray], tracks: dict) -> None:
+        if len(self.track_team) == 0:
+            raise RuntimeError("TeamAssigner.fit must be called before assign_teams.")
+
+        for frame_idx in range(len(frames)):
+            players = tracks["players"][frame_idx]
+            for pid, info in players.items():
+                team_id = self.track_team.get(pid)
+                if team_id is None:
+                    continue
+                info["team_id"] = int(team_id)
+                color = self.team_colors_bgr.get(team_id)
+                if color is not None:
+                    info["team_color"] = color
+                    info["team_colour"] = color
+
+        for frame_idx in range(len(frames)):
+            players = tracks["players"][frame_idx]
+            goalkeepers = tracks.get("goalkeepers", [{}] * len(frames))[frame_idx]
+
+            players_det = self._detections_from_tracks(players, class_from_team=True)
+            goalkeepers_det = self._detections_from_tracks(goalkeepers, class_from_team=False)
+
+            if len(players_det) == 0 or len(goalkeepers_det) == 0:
+                continue
+            if not ((players_det.class_id == 0).any() and (players_det.class_id == 1).any()):
+                continue
+
+            gk_team_ids = resolve_goalkeepers_team_id(players_det, goalkeepers_det)
+            for (gid, info), team_id in zip(goalkeepers.items(), gk_team_ids):
+                info["team_id"] = int(team_id)
+                color = self.team_colors_bgr.get(int(team_id))
+                if color is not None:
+                    info["team_color"] = color
+                    info["team_colour"] = color

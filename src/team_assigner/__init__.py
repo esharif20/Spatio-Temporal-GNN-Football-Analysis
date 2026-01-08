@@ -1,1 +1,3 @@
-from .team_assigner import TeamAssigner
+from .team_assigner import TeamAssigner, TeamAssignerConfig
+
+__all__ = ["TeamAssigner", "TeamAssignerConfig"]

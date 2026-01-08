@@ -1,0 +1,63 @@
+"""Centralized configuration for the football analysis pipeline."""
+
+from pathlib import Path
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+ROOT = Path(__file__).resolve().parent
+PLAYER_DETECTION_MODEL_PATH = ROOT / "models" / "best.pt"
+BALL_DETECTION_MODEL_PATH = ROOT / "data" / "football-ball-detection.pt"
+PITCH_DETECTION_MODEL_PATH = ROOT / "data" / "football-pitch-detection.pt"
+OUTPUT_DIR = ROOT / "output_videos"
+STUB_DIR = ROOT / "stubs"
+INPUT_DIR = ROOT / "input_videos"
+
+# =============================================================================
+# Detection Defaults
+# =============================================================================
+
+BALL_CLASS_ID = 0
+IMG_SIZE = 1280
+CONF_THRESHOLD = 0.25
+NMS_IOU = 0.70
+MAX_DET = 300
+PAD_BALL = 10
+
+# =============================================================================
+# Ball Tracking Defaults
+# =============================================================================
+
+BALL_MODEL_IMG_SIZE = 640
+BALL_MODEL_CONF = 0.15
+BALL_MULTI_CONF = 0.35
+BALL_SLICE_WH = 640
+BALL_OVERLAP_WH = 96
+BALL_SLICER_IOU = 0.10
+BALL_SLICER_WORKERS = 1
+BALL_TILE_GRID = None
+BALL_USE_KALMAN = False
+BALL_KALMAN_PREDICT = False
+BALL_KALMAN_MAX_GAP = 10
+BALL_AUTO_AREA = False
+BALL_ACQUIRE_CONF = 0.25
+BALL_MAX_ASPECT = 3.0
+BALL_AREA_RATIO_MIN = 0.25
+BALL_AREA_RATIO_MAX = 4.0
+BALL_MAX_JUMP_RATIO = 8.0
+
+# =============================================================================
+# Stub/Cache Defaults
+# =============================================================================
+
+READ_FROM_STUB = True
+
+# =============================================================================
+# Team Assignment Defaults
+# =============================================================================
+
+TEAM_STRIDE = 60
+TEAM_BATCH_SIZE = 32
+TEAM_MAX_CROPS = 2000
+TEAM_MIN_CROP_SIZE = (10, 6)

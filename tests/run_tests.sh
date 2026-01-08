@@ -8,6 +8,8 @@ set -e
 # Move to project root
 cd "$(dirname "$0")/.."
 export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
+export TMPDIR="${TMPDIR:-$(pwd)/.tmp}"
+mkdir -p "$TMPDIR"
 
 echo ""
 echo "============================================"

@@ -99,17 +99,18 @@ class TestGetObjectTracks:
         # Create a temporary stub file
         temp_dir = tempfile.mkdtemp()
         stub_path = os.path.join(temp_dir, "test_stub.pkl")
-        
-        # Create mock tracks
+
+        # Create mock tracks - must include goalkeepers key for backwards compat
         mock_tracks = {
             "players": [{1: {"bbox": [10, 10, 50, 50]}}],
             "referees": [{}],
+            "goalkeepers": [{}],
             "ball": [{1: {"bbox": [100, 100, 110, 110]}}]
         }
-        
+
         with open(stub_path, 'wb') as f:
             pickle.dump(mock_tracks, f)
-        
+
         try:
             tracks = mock_tracker.get_object_tracks(
                 frames=[],  # Empty - should not be used
@@ -117,10 +118,11 @@ class TestGetObjectTracks:
                 stub_path=stub_path
             )
 
-            # Check that all expected keys are present (code adds backwards compat "referee" alias)
+            # Check that all expected keys are present
             assert tracks["players"] == mock_tracks["players"]
             assert tracks["ball"] == mock_tracks["ball"]
             assert tracks["referees"] == mock_tracks["referees"]
+            assert tracks["goalkeepers"] == mock_tracks["goalkeepers"]
         finally:
             os.remove(stub_path)
             os.rmdir(temp_dir)
@@ -234,6 +236,7 @@ class TestDrawAnnotations:
                 {1: {"bbox": [60, 60, 110, 160]}}
             ],
             "referees": [{}, {}, {}],
+            "goalkeepers": [{}, {}, {}],
             "ball": [
                 {1: {"bbox": [100, 100, 110, 110]}},
                 {1: {"bbox": [105, 105, 115, 115]}},
@@ -241,13 +244,8 @@ class TestDrawAnnotations:
             ]
         }
 
-        # Create team_ball_control array
-        team_ball_control = np.array([None] * len(frames))
-
-        with patch.object(mock_tracker, 'draw_ellipse', return_value=frames[0]), \
-             patch.object(mock_tracker, 'draw_ball_marker', return_value=frames[0]) if hasattr(mock_tracker, 'draw_ball_marker') else patch('builtins.print'):
-
-            result = mock_tracker.draw_annotations(frames, tracks, team_ball_control)
+        with patch.object(mock_tracker, 'draw_ellipse', return_value=frames[0]):
+            result = mock_tracker.draw_annotations(frames, tracks)
 
         assert isinstance(result, list)
         assert len(result) == len(frames)
@@ -259,20 +257,18 @@ class TestDrawAnnotations:
         tracks = {
             "players": [{}],
             "referees": [{}],
+            "goalkeepers": [{}],
             "ball": [{}]
         }
 
-        # Create team_ball_control array
-        team_ball_control = np.array([None] * len(frames))
-
-        result = mock_tracker.draw_annotations(frames, tracks, team_ball_control)
+        result = mock_tracker.draw_annotations(frames, tracks)
 
         assert result[0].shape == frames[0].shape
 
 
-class TestInterpolateBallPositions:
-    """Tests for interpolate_ball_positions method."""
-    
+class TestInterpolateBallTracks:
+    """Tests for interpolate_ball_tracks method."""
+
     @pytest.fixture
     def mock_tracker(self):
         """Create a mocked Tracker instance."""
@@ -281,50 +277,50 @@ class TestInterpolateBallPositions:
             from trackers.tracker import Tracker
             tracker = Tracker("dummy_path.pt")
             yield tracker
-    
+
     def test_interpolate_fills_gaps(self, mock_tracker):
         """Test that interpolation fills missing positions."""
         # Ball positions with gap at frame 1
-        ball_positions = [
+        ball_tracks = [
             {1: {"bbox": [100, 100, 110, 110]}},  # Frame 0
             {},                                    # Frame 1 - missing
             {1: {"bbox": [120, 120, 130, 130]}}   # Frame 2
         ]
-        
-        result = mock_tracker.interpolate_ball_positions(ball_positions)
-        
+
+        result = mock_tracker.interpolate_ball_tracks(ball_tracks)
+
         # All frames should have ball position
         assert len(result) == 3
         for frame in result:
             assert 1 in frame
             assert "bbox" in frame[1]
-    
+
     def test_interpolate_marks_interpolated_frames(self, mock_tracker):
         """Test that interpolated frames are marked."""
-        ball_positions = [
+        ball_tracks = [
             {1: {"bbox": [100, 100, 110, 110]}},
             {},
             {1: {"bbox": [120, 120, 130, 130]}}
         ]
-        
-        result = mock_tracker.interpolate_ball_positions(ball_positions)
-        
+
+        result = mock_tracker.interpolate_ball_tracks(ball_tracks)
+
         # Frame 1 should be marked as interpolated
         assert result[1][1].get("interpolated", False) == True
         # Frame 0 and 2 should not be interpolated
         assert result[0][1].get("interpolated", True) == False
         assert result[2][1].get("interpolated", True) == False
-    
+
     def test_interpolate_linear_values(self, mock_tracker):
         """Test that interpolation produces reasonable values."""
-        ball_positions = [
+        ball_tracks = [
             {1: {"bbox": [100, 100, 110, 110]}},
             {},
             {1: {"bbox": [200, 200, 210, 210]}}
         ]
-        
-        result = mock_tracker.interpolate_ball_positions(ball_positions)
-        
+
+        result = mock_tracker.interpolate_ball_tracks(ball_tracks)
+
         # Frame 1 should be approximately in the middle
         bbox = result[1][1]["bbox"]
         # Allow some tolerance for smoothing
