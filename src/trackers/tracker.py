@@ -12,6 +12,7 @@ Keeps the tutorial logic but exposes a clean API similar to src/trackers/tracker
 import os
 import pickle
 import time
+import threading
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -130,26 +131,42 @@ class Tracker:
         self.ball_model_names: Dict[int, str] = {}
         self.ball_model_class_id = None
         self.ball_slicer = None
+        self._ball_model_lock = None
         if cfg.ball_model_path:
             self.ball_model = YOLO(cfg.ball_model_path)
-            self._select_device(self.ball_model, device)
+            # Keep ball model on CPU when using slicer - many small sequential
+            # calls are faster without GPU transfer overhead
+            if not (self.ball_use_slicer or self.ball_tile_grid):
+                self._select_device(self.ball_model, device)
             self.ball_model_names = self._normalize_class_names(self.ball_model.names)
             self.ball_model_class_id = self._resolve_class_id(
                 self.ball_model_names, ["ball", "football"]
             )
+            self._ball_model_lock = threading.Lock()
             print(f"Ball model classes: {self.ball_model_names}")
             if self.ball_tile_grid:
                 rows, cols = self.ball_tile_grid
                 print(f"Ball tiling: {rows}x{cols} -> imgsz {self.ball_imgsz}")
             elif self.ball_use_slicer:
                 def callback(image_slice: np.ndarray) -> sv.Detections:
-                    result = self.ball_model.predict(
-                        image_slice,
-                        conf=self.ball_conf,
-                        imgsz=self.ball_imgsz,
-                        max_det=self.max_det,
-                        verbose=False,
-                    )[0]
+                    lock = self._ball_model_lock
+                    if lock is None:
+                        result = self.ball_model.predict(
+                            image_slice,
+                            conf=self.ball_conf,
+                            imgsz=self.ball_imgsz,
+                            max_det=self.max_det,
+                            verbose=False,
+                        )[0]
+                    else:
+                        with lock:
+                            result = self.ball_model.predict(
+                                image_slice,
+                                conf=self.ball_conf,
+                                imgsz=self.ball_imgsz,
+                                max_det=self.max_det,
+                                verbose=False,
+                            )[0]
                     return sv.Detections.from_ultralytics(result)
 
                 self.ball_slicer = sv.InferenceSlicer(
@@ -213,8 +230,6 @@ class Tracker:
 
         if target:
             model.to(target)
-            if str(target).startswith("cuda"):
-                torch.backends.cudnn.benchmark = True
 
     @staticmethod
     def _bgr_to_hex(color_bgr: tuple[int, int, int]) -> str:
