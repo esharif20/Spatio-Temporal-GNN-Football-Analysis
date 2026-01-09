@@ -97,6 +97,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ball-max-jump", type=float, default=BALL_MAX_JUMP_RATIO,
                         help="Max jump ratio vs size")
 
+    # Radar mode options
+    parser.add_argument("--voronoi", action="store_true",
+                        help="Show Voronoi team control regions (radar mode)")
+    parser.add_argument("--no-ball-path", action="store_true",
+                        help="Hide ball trajectory on radar")
+
     # Caching (hyphen primary, underscore for backward compat)
     parser.add_argument("--no-stub", "--no_stub",
                         dest="no_stub",

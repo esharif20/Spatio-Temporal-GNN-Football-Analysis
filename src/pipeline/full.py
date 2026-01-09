@@ -3,9 +3,12 @@
 from typing import Iterator
 
 import numpy as np
+import supervision as sv
+from ultralytics import YOLO
 
 from config import (
     BALL_DETECTION_MODEL_PATH,
+    PITCH_DETECTION_MODEL_PATH,
     CONF_THRESHOLD,
     BALL_SLICE_WH,
     BALL_OVERLAP_WH,
@@ -29,6 +32,7 @@ from config import (
     TEAM_MAX_CROPS,
     TEAM_MIN_CROP_SIZE,
 )
+from utils.drawing import draw_keypoints
 from trackers.track_stabiliser import stabilise_tracks
 from team_assigner import TeamAssigner, TeamAssignerConfig
 from utils.metrics import compute_ball_metrics, print_ball_metrics
@@ -74,6 +78,12 @@ def run(
     Yields:
         Annotated frames with full analysis
     """
+    # Load pitch model if available
+    pitch_model = None
+    if PITCH_DETECTION_MODEL_PATH.exists():
+        print("Loading pitch detection model...")
+        pitch_model = YOLO(str(PITCH_DETECTION_MODEL_PATH)).to(device=device)
+
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)
 
@@ -144,4 +154,9 @@ def run(
 
     output_frames = tracker.draw_annotations(frames, tracks)
     for frame in output_frames:
+        # Add pitch keypoints overlay if model available
+        if pitch_model is not None:
+            result = pitch_model(frame, verbose=False)[0]
+            keypoints = sv.KeyPoints.from_ultralytics(result)
+            frame = draw_keypoints(frame, keypoints)
         yield frame

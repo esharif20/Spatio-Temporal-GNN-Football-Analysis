@@ -57,6 +57,9 @@ def main() -> None:
         ball_area_ratio_min=args.ball_area_min,
         ball_area_ratio_max=args.ball_area_max,
         ball_max_jump_ratio=args.ball_max_jump,
+        # Radar mode options
+        show_voronoi=args.voronoi,
+        show_ball_path=not args.no_ball_path,
     )
 
     # Write output video

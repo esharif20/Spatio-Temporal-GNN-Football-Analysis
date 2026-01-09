@@ -42,6 +42,9 @@ def get_frame_generator(
     ball_area_ratio_min: float,
     ball_area_ratio_max: float,
     ball_max_jump_ratio: float,
+    # Radar mode options
+    show_voronoi: bool = False,
+    show_ball_path: bool = True,
 ) -> Iterator[np.ndarray]:
     """Get appropriate frame generator for pipeline mode.
 
@@ -194,6 +197,8 @@ def get_frame_generator(
             ball_area_ratio_min=ball_area_ratio_min,
             ball_area_ratio_max=ball_area_ratio_max,
             ball_max_jump_ratio=ball_max_jump_ratio,
+            show_voronoi=show_voronoi,
+            show_ball_path=show_ball_path,
         )
 
     raise NotImplementedError(f"Mode {mode} is not implemented.")

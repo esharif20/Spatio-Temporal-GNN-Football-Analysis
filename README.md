@@ -126,13 +126,21 @@ The `ViewTransformer` class (`pitch/view_transformer.py`) provides:
 The `radar` pipeline mode combines everything:
 1. Detects players and ball
 2. Detects pitch keypoints
-3. Computes homography
+3. Computes homography (smoothed over 5 frames)
 4. Transforms all positions to pitch coordinates
 5. Draws 2D tactical diagram with:
-   - Team-colored player markers
-   - Ball position
-   - Optional Voronoi control regions
-   - Optional movement paths
+   - Team-colored player markers (cyan vs pink)
+   - Ball position and trajectory path
+   - Optional Voronoi team control regions (`--voronoi`)
+
+#### Voronoi Control Regions
+
+When enabled with `--voronoi`, the radar shows which team controls each area of the pitch based on player positions. Areas are colored by which team's player is closest.
+
+```bash
+# Radar with Voronoi overlay
+./src/run.sh radar my_match --voronoi --fresh
+```
 
 ---
 
@@ -166,18 +174,18 @@ Output: `src/output_videos/Test6/Test6_ALL.mp4`
 
 | Mode | Detection | Tracking | Teams | Ball | Pitch | Output |
 |------|:---------:|:--------:|:-----:|:----:|:-----:|--------|
-| `all` | ✓ | ✓ | ✓ | ✓ | - | Full annotated video |
+| `all` | ✓ | ✓ | ✓ | ✓ | ✓ | Full annotated video with keypoints |
 | `team` | ✓ | ✓ | ✓ | - | - | Team-colored boxes |
 | `track` | ✓ | ✓ | - | - | - | Boxes with IDs |
 | `players` | ✓ | - | - | - | - | Detection only |
 | `ball` | - | - | - | ✓ | - | Ball trajectory |
-| `pitch` | - | - | - | - | ✓ | Keypoint visualization |
-| `radar` | ✓ | ✓ | ✓ | ✓ | ✓ | 2D tactical view |
+| `pitch` | - | - | - | - | ✓ | Keypoint visualization only |
+| `radar` | ✓ | ✓ | ✓ | ✓ | ✓ | 2D tactical view + Voronoi |
 
 ### Usage Examples
 
 ```bash
-# Full analysis
+# Full analysis (includes pitch keypoints overlay)
 ./src/run.sh all my_match --fresh
 
 # Ball tracking debug
@@ -185,6 +193,9 @@ Output: `src/output_videos/Test6/Test6_ALL.mp4`
 
 # Tactical radar view
 ./src/run.sh radar my_match --fresh
+
+# Radar with Voronoi team control regions
+./src/run.sh radar my_match --voronoi
 
 # Pitch keypoints only
 ./src/run.sh pitch my_match
@@ -213,6 +224,13 @@ Output: `src/output_videos/Test6/Test6_ALL.mp4`
 | `--ball-kalman` | off | Enable Kalman smoothing |
 | `--no-ball-model` | off | Use multi-class model for ball |
 | `--ball-mc-conf` | 0.35 | Multi-class ball confidence |
+
+### Radar Mode
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--voronoi` | off | Show Voronoi team control regions |
+| `--no-ball-path` | off | Hide ball trajectory on radar |
 
 ### Performance
 

@@ -26,6 +26,8 @@ BALL_AREA_MIN=""
 BALL_AREA_MAX=""
 BALL_MAX_JUMP=""
 DET_BATCH=""
+VORONOI=0
+NO_BALL_PATH=0
 
 lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
@@ -194,6 +196,14 @@ while [[ $# -gt 0 ]]; do
       NO_BALL_MODEL=1
       shift
       ;;
+    --voronoi)
+      VORONOI=1
+      shift
+      ;;
+    --no-ball-path)
+      NO_BALL_PATH=1
+      shift
+      ;;
     *)
       if [[ -z "$MODE_INPUT" ]]; then
         MODE_INPUT="$1"
@@ -324,6 +334,12 @@ if [[ "$NO_STUB" -eq 1 ]]; then
 fi
 if [[ "$CLEAR_STUB" -eq 1 ]]; then
   cmd+=(--clear-stub)
+fi
+if [[ "$VORONOI" -eq 1 ]]; then
+  cmd+=(--voronoi)
+fi
+if [[ "$NO_BALL_PATH" -eq 1 ]]; then
+  cmd+=(--no-ball-path)
 fi
 
 "${cmd[@]}"
