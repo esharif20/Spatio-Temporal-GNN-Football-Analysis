@@ -223,9 +223,10 @@ case "$mode_key" in
   ball|ball_detection) mode=BALL_DETECTION ;;
   track|tracking|player_tracking) mode=PLAYER_TRACKING ;;
   team|team_classification) mode=TEAM_CLASSIFICATION ;;
+  radar|tactical) mode=RADAR ;;
   *)
     echo "Unknown mode: $MODE_INPUT" >&2
-    echo "Valid modes: all, pitch, players, ball, track, team" >&2
+    echo "Valid modes: all, pitch, players, ball, track, team, radar" >&2
     exit 1
     ;;
 esac
@@ -252,8 +253,8 @@ if [[ -z "$OUT" ]]; then
 fi
 
 cmd=(python src/main.py
-  --source_video_path "$video"
-  --target_video_path "$OUT"
+  --source-video-path "$video"
+  --target-video-path "$OUT"
   --mode "$mode"
   --device "$DEVICE"
 )
@@ -319,10 +320,10 @@ if [[ -n "$DET_BATCH" ]]; then
   cmd+=(--det-batch "$DET_BATCH")
 fi
 if [[ "$NO_STUB" -eq 1 ]]; then
-  cmd+=(--no_stub)
+  cmd+=(--no-stub)
 fi
 if [[ "$CLEAR_STUB" -eq 1 ]]; then
-  cmd+=(--clear_stub)
+  cmd+=(--clear-stub)
 fi
 
 "${cmd[@]}"

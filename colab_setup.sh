@@ -39,11 +39,7 @@ if [[ -f "$ROOT/src/setup.sh" ]]; then
 fi
 
 if [[ -n "$CACHE_ROOT" ]]; then
-  mkdir -p "$CACHE_ROOT"/{data,input_videos,models}
-  if compgen -G "$CACHE_ROOT/data/*.pt" > /dev/null; then
-    mkdir -p "$ROOT/src/data"
-    cp -n "$CACHE_ROOT"/data/*.pt "$ROOT/src/data"/
-  fi
+  mkdir -p "$CACHE_ROOT"/{input_videos,models}
   if compgen -G "$CACHE_ROOT/input_videos/*.mp4" > /dev/null; then
     mkdir -p "$ROOT/src/input_videos"
     cp -n "$CACHE_ROOT"/input_videos/*.mp4 "$ROOT/src/input_videos"/
@@ -62,27 +58,16 @@ if [[ "${SKIP_ASSETS:-0}" != "1" ]]; then
   fi
 fi
 
-mkdir -p "$ROOT/src/input_videos" "$ROOT/src/output_videos" "$ROOT/src/stubs"
+mkdir -p "$ROOT/src/input_videos" "$ROOT/src/output_videos" "$ROOT/src/stubs" "$ROOT/src/models"
 
-if compgen -G "$ROOT/src/data/*.mp4" > /dev/null; then
-  cp -n "$ROOT"/src/data/*.mp4 "$ROOT/src/input_videos"/
-fi
-
-if [[ -f "$ROOT/src/data/football-player-detection.pt" ]]; then
-  mkdir -p "$ROOT/src/models"
-  cp -n "$ROOT/src/data/football-player-detection.pt" "$ROOT/src/models/best.pt"
-fi
-
+# Cache models and videos for faster re-runs
 if [[ -n "$CACHE_ROOT" ]]; then
-  mkdir -p "$CACHE_ROOT"/{data,input_videos,models}
-  if compgen -G "$ROOT/src/data/*.pt" > /dev/null; then
-    cp -n "$ROOT"/src/data/*.pt "$CACHE_ROOT/data"/
-  fi
+  mkdir -p "$CACHE_ROOT"/{input_videos,models}
   if compgen -G "$ROOT/src/input_videos/*.mp4" > /dev/null; then
     cp -n "$ROOT"/src/input_videos/*.mp4 "$CACHE_ROOT/input_videos"/
   fi
-  if [[ -f "$ROOT/src/models/best.pt" ]]; then
-    cp -n "$ROOT/src/models/best.pt" "$CACHE_ROOT/models"/
+  if compgen -G "$ROOT/src/models/*.pt" > /dev/null; then
+    cp -n "$ROOT"/src/models/*.pt "$CACHE_ROOT/models"/
   fi
 fi
 

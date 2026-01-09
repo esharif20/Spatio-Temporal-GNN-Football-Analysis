@@ -7,9 +7,14 @@ from pathlib import Path
 # =============================================================================
 
 ROOT = Path(__file__).resolve().parent
-PLAYER_DETECTION_MODEL_PATH = ROOT / "models" / "best.pt"
-BALL_DETECTION_MODEL_PATH = ROOT / "data" / "football-ball-detection.pt"
-PITCH_DETECTION_MODEL_PATH = ROOT / "data" / "football-pitch-detection.pt"
+MODELS_DIR = ROOT / "models"
+
+# Model paths (all consolidated in models/ directory)
+PLAYER_DETECTION_MODEL_PATH = MODELS_DIR / "player_detection.pt"
+BALL_DETECTION_MODEL_PATH = MODELS_DIR / "ball_detection.pt"
+PITCH_DETECTION_MODEL_PATH = MODELS_DIR / "pitch_detection.pt"
+
+# Data directories
 OUTPUT_DIR = ROOT / "output_videos"
 STUB_DIR = ROOT / "stubs"
 INPUT_DIR = ROOT / "input_videos"
@@ -62,3 +67,12 @@ TEAM_STRIDE = 60
 TEAM_BATCH_SIZE = 32
 TEAM_MAX_CROPS = 2000
 TEAM_MIN_CROP_SIZE = (10, 6)
+
+# =============================================================================
+# Analytics Defaults
+# =============================================================================
+
+ANALYTICS_CONTROL_THRESHOLD_PX = 100  # pixels - possession distance threshold
+ANALYTICS_CONTROL_THRESHOLD_CM = 300  # 3 meters - possession threshold with homography
+ANALYTICS_DIRECTION_CHANGE_DEG = 45.0  # degrees - ball direction change detection
+DEFAULT_VIDEO_FPS = 25.0

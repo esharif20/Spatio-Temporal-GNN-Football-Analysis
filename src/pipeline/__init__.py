@@ -14,6 +14,7 @@ class Mode(Enum):
     PLAYER_TRACKING = "PLAYER_TRACKING"
     TEAM_CLASSIFICATION = "TEAM_CLASSIFICATION"
     ALL = "ALL"
+    RADAR = "RADAR"
 
 
 def get_frame_generator(
@@ -62,6 +63,7 @@ def get_frame_generator(
     from .tracking import run as run_tracking
     from .team import run as run_team
     from .full import run as run_full
+    from .radar import run as run_radar
 
     if mode == Mode.PITCH_DETECTION:
         if not PITCH_DETECTION_MODEL_PATH.exists():
@@ -140,6 +142,35 @@ def get_frame_generator(
 
     if mode == Mode.ALL:
         return run_full(
+            source_video_path=source_video_path,
+            read_from_stub=read_from_stub,
+            device=device,
+            det_batch_size=det_batch_size,
+            fast_ball=fast_ball,
+            ball_slice_wh=ball_slice_wh,
+            ball_overlap_wh=ball_overlap_wh,
+            ball_slicer_iou=ball_slicer_iou,
+            ball_slicer_workers=ball_slicer_workers,
+            ball_imgsz=ball_imgsz,
+            ball_conf=ball_conf,
+            ball_conf_multiclass=ball_conf_multiclass,
+            use_ball_model_weights=use_ball_model_weights,
+            ball_tile_grid=ball_tile_grid,
+            ball_use_kalman=ball_use_kalman,
+            ball_kalman_predict=ball_kalman_predict,
+            ball_kalman_max_gap=ball_kalman_max_gap,
+            ball_auto_area=ball_auto_area,
+            ball_acquire_conf=ball_acquire_conf,
+            ball_max_aspect=ball_max_aspect,
+            ball_area_ratio_min=ball_area_ratio_min,
+            ball_area_ratio_max=ball_area_ratio_max,
+            ball_max_jump_ratio=ball_max_jump_ratio,
+        )
+
+    if mode == Mode.RADAR:
+        if not PITCH_DETECTION_MODEL_PATH.exists():
+            raise FileNotFoundError(f"Pitch model not found: {PITCH_DETECTION_MODEL_PATH}")
+        return run_radar(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
             device=device,

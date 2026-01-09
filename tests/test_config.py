@@ -17,28 +17,30 @@ class TestConfigPaths:
 
     def test_player_detection_model_path(self):
         """Test that player detection model path is correctly defined."""
-        from config import PLAYER_DETECTION_MODEL_PATH, ROOT
+        from config import PLAYER_DETECTION_MODEL_PATH, MODELS_DIR
 
         assert PLAYER_DETECTION_MODEL_PATH is not None
         assert isinstance(PLAYER_DETECTION_MODEL_PATH, Path)
-        assert str(PLAYER_DETECTION_MODEL_PATH).endswith("best.pt")
-        assert PLAYER_DETECTION_MODEL_PATH.parent == ROOT / "models"
+        assert str(PLAYER_DETECTION_MODEL_PATH).endswith("player_detection.pt")
+        assert PLAYER_DETECTION_MODEL_PATH.parent == MODELS_DIR
 
     def test_ball_detection_model_path(self):
         """Test that ball detection model path is correctly defined."""
-        from config import BALL_DETECTION_MODEL_PATH, ROOT
+        from config import BALL_DETECTION_MODEL_PATH, MODELS_DIR
 
         assert BALL_DETECTION_MODEL_PATH is not None
         assert isinstance(BALL_DETECTION_MODEL_PATH, Path)
-        assert "football-ball-detection" in str(BALL_DETECTION_MODEL_PATH)
+        assert str(BALL_DETECTION_MODEL_PATH).endswith("ball_detection.pt")
+        assert BALL_DETECTION_MODEL_PATH.parent == MODELS_DIR
 
     def test_pitch_detection_model_path(self):
         """Test that pitch detection model path is correctly defined."""
-        from config import PITCH_DETECTION_MODEL_PATH, ROOT
+        from config import PITCH_DETECTION_MODEL_PATH, MODELS_DIR
 
         assert PITCH_DETECTION_MODEL_PATH is not None
         assert isinstance(PITCH_DETECTION_MODEL_PATH, Path)
-        assert "football-pitch-detection" in str(PITCH_DETECTION_MODEL_PATH)
+        assert str(PITCH_DETECTION_MODEL_PATH).endswith("pitch_detection.pt")
+        assert PITCH_DETECTION_MODEL_PATH.parent == MODELS_DIR
 
     def test_output_directory_path(self):
         """Test that output directory path is defined."""

@@ -27,20 +27,38 @@ def parse_args() -> argparse.Namespace:
         Parsed arguments namespace
     """
     parser = argparse.ArgumentParser(description="Football Analysis Pipeline")
-    parser.add_argument("--source_video_path", type=str, required=True)
-    parser.add_argument("--target_video_path", type=str, required=True)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--mode", type=Mode, default=Mode.PLAYER_DETECTION)
+
+    # Core arguments (hyphen primary, underscore for backward compat)
     parser.add_argument(
-        "--det-batch",
-        "--det-batch-size",
+        "--source-video-path", "--source_video_path",
+        dest="source_video_path",
+        type=str,
+        required=True,
+        help="Path to input video",
+    )
+    parser.add_argument(
+        "--target-video-path", "--target_video_path",
+        dest="target_video_path",
+        type=str,
+        required=True,
+        help="Path to output video",
+    )
+    parser.add_argument("--device", type=str, default="cpu",
+                        help="Device for inference (cpu, cuda, mps)")
+    parser.add_argument("--mode", type=Mode, default=Mode.PLAYER_DETECTION,
+                        help="Pipeline mode")
+    parser.add_argument(
+        "--det-batch", "--det-batch-size",
+        dest="det_batch",
         type=int,
         default=DETECTION_BATCH_SIZE,
         help="Detection batch size (0=auto)",
     )
 
     # Ball tracking
-    parser.add_argument("--fast_ball", "--fast-ball", action="store_true",
+    parser.add_argument("--fast-ball", "--fast_ball",
+                        dest="fast_ball",
+                        action="store_true",
                         help="Disable ball slicing for speed")
     parser.add_argument("--ball-conf", type=float, default=BALL_MODEL_CONF,
                         help="Ball detector confidence")
@@ -79,10 +97,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ball-max-jump", type=float, default=BALL_MAX_JUMP_RATIO,
                         help="Max jump ratio vs size")
 
-    # Caching
-    parser.add_argument("--no_stub", action="store_true",
+    # Caching (hyphen primary, underscore for backward compat)
+    parser.add_argument("--no-stub", "--no_stub",
+                        dest="no_stub",
+                        action="store_true",
                         help="Do not read from cached stubs")
-    parser.add_argument("--clear_stub", action="store_true",
+    parser.add_argument("--clear-stub", "--clear_stub",
+                        dest="clear_stub",
+                        action="store_true",
                         help="Delete cached stubs before running")
+    parser.add_argument("--fresh", action="store_true",
+                        help="Equivalent to --no-stub --clear-stub")
 
     return parser.parse_args()

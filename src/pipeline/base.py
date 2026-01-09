@@ -8,7 +8,6 @@ import numpy as np
 from config import (
     PLAYER_DETECTION_MODEL_PATH,
     BALL_DETECTION_MODEL_PATH,
-    STUB_DIR,
     IMG_SIZE,
     CONF_THRESHOLD,
     NMS_IOU,
@@ -17,7 +16,11 @@ from config import (
     PAD_BALL,
 )
 from utils.video_utils import read_video
+from utils.cache import stub_path
 from trackers.tracker import Tracker, TrackerConfig
+
+# Re-export for backward compatibility
+get_stub_path = stub_path
 
 
 def load_frames(source_video_path: str) -> List[np.ndarray]:
@@ -112,26 +115,3 @@ def build_tracker(
             print(f"Ball conf: {ball_conf}")
 
     return tracker
-
-
-def get_stub_path(source_video_path: str, mode: "Mode") -> Path:
-    """Generate stub file path for caching.
-
-    Args:
-        source_video_path: Path to source video
-        mode: Pipeline mode enum
-
-    Returns:
-        Path to stub file
-    """
-    from . import Mode
-
-    STUB_DIR.mkdir(parents=True, exist_ok=True)
-    stem = Path(source_video_path).stem
-    if mode in {Mode.PLAYER_DETECTION, Mode.PLAYER_TRACKING, Mode.TEAM_CLASSIFICATION}:
-        stub_key = "people_tracks"
-    elif mode == Mode.BALL_DETECTION:
-        stub_key = "ball_tracks"
-    else:
-        stub_key = mode.value.lower()
-    return STUB_DIR / f"{stem}_{stub_key}.pkl"
