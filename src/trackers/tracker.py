@@ -42,6 +42,7 @@ class Tracker:
         ball_id: int = 0
         pad_ball: int = 10
         max_det: int = 300
+        det_batch_size: int = 0
         ball_model_path: Optional[str] = None
         ball_imgsz: int = 640
         ball_conf: float = 0.25
@@ -100,6 +101,7 @@ class Tracker:
         self.ball_id = int(cfg.ball_id) if cfg.ball_id is not None else None
         self.pad_ball = int(cfg.pad_ball)
         self.max_det = int(cfg.max_det)
+        self.det_batch_size = max(0, int(cfg.det_batch_size))
         self.ball_imgsz = int(cfg.ball_imgsz)
         self.ball_conf = float(cfg.ball_conf)
         self.ball_conf_multiclass = (
@@ -201,13 +203,18 @@ class Tracker:
         except Exception:
             return
 
+        target = None
         if device:
-            model.to(device)
-            return
-        if torch.cuda.is_available():
-            model.to("cuda")
+            target = device
+        elif torch.cuda.is_available():
+            target = "cuda"
         elif torch.backends.mps.is_available():
-            model.to("mps")
+            target = "mps"
+
+        if target:
+            model.to(target)
+            if str(target).startswith("cuda"):
+                torch.backends.cudnn.benchmark = True
 
     @staticmethod
     def _bgr_to_hex(color_bgr: tuple[int, int, int]) -> str:
@@ -240,8 +247,16 @@ class Tracker:
         Returns:
             List of YOLO detection results
         """
-        device_type = getattr(self.model.device, "type", str(self.model.device))
-        batch_size = 1 if device_type == "mps" else 16
+        if self.det_batch_size > 0:
+            batch_size = self.det_batch_size
+        else:
+            device_type = str(getattr(self.model.device, "type", self.model.device))
+            if device_type.startswith("cuda"):
+                batch_size = 64
+            elif device_type == "mps":
+                batch_size = 1
+            else:
+                batch_size = 16
 
         detections = []
         total = len(frames)

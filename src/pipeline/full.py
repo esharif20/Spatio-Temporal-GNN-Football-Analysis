@@ -40,6 +40,7 @@ def run(
     source_video_path: str,
     read_from_stub: bool,
     device: str,
+    det_batch_size: int,
     fast_ball: bool = False,
     ball_slice_wh: int = BALL_SLICE_WH,
     ball_overlap_wh: int = BALL_OVERLAP_WH,
@@ -66,6 +67,7 @@ def run(
         source_video_path: Path to input video
         read_from_stub: Whether to read from cached stubs
         device: Device for inference (cpu, cuda, mps)
+        det_batch_size: Detection batch size (0=auto)
         fast_ball: Disable slicer for speed
         ... (other ball tracking parameters)
 
@@ -77,6 +79,7 @@ def run(
 
     tracker = build_tracker(
         device=device,
+        det_batch_size=det_batch_size,
         use_ball_model=True,
         fast_ball=fast_ball,
         ball_slice_wh=ball_slice_wh,

@@ -24,6 +24,7 @@ CONF_THRESHOLD = 0.25
 NMS_IOU = 0.70
 MAX_DET = 300
 PAD_BALL = 10
+DETECTION_BATCH_SIZE = 0
 
 # =============================================================================
 # Ball Tracking Defaults

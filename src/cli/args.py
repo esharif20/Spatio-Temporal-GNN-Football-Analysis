@@ -15,6 +15,7 @@ from config import (
     BALL_AREA_RATIO_MIN,
     BALL_AREA_RATIO_MAX,
     BALL_MAX_JUMP_RATIO,
+    DETECTION_BATCH_SIZE,
 )
 from pipeline import Mode
 
@@ -30,6 +31,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target_video_path", type=str, required=True)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--mode", type=Mode, default=Mode.PLAYER_DETECTION)
+    parser.add_argument(
+        "--det-batch",
+        "--det-batch-size",
+        type=int,
+        default=DETECTION_BATCH_SIZE,
+        help="Detection batch size (0=auto)",
+    )
 
     # Ball tracking
     parser.add_argument("--fast_ball", "--fast-ball", action="store_true",

@@ -21,6 +21,7 @@ def get_frame_generator(
     source_video_path: str,
     device: str,
     read_from_stub: bool,
+    det_batch_size: int,
     fast_ball: bool,
     ball_slice_wh: int,
     ball_overlap_wh: int,
@@ -48,6 +49,7 @@ def get_frame_generator(
         source_video_path: Path to input video
         device: Device for inference (cpu, cuda, mps)
         read_from_stub: Whether to read from cached stubs
+        det_batch_size: Detection batch size (0=auto)
         ... (ball tracking parameters)
 
     Returns:
@@ -71,6 +73,7 @@ def get_frame_generator(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
             device=device,
+            det_batch_size=det_batch_size,
         )
 
     if mode == Mode.BALL_DETECTION:
@@ -78,6 +81,7 @@ def get_frame_generator(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
             device=device,
+            det_batch_size=det_batch_size,
             fast_ball=fast_ball,
             ball_slice_wh=ball_slice_wh,
             ball_overlap_wh=ball_overlap_wh,
@@ -104,6 +108,7 @@ def get_frame_generator(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
             device=device,
+            det_batch_size=det_batch_size,
         )
 
     if mode == Mode.TEAM_CLASSIFICATION:
@@ -111,6 +116,7 @@ def get_frame_generator(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
             device=device,
+            det_batch_size=det_batch_size,
             fast_ball=fast_ball,
             ball_slice_wh=ball_slice_wh,
             ball_overlap_wh=ball_overlap_wh,
@@ -137,6 +143,7 @@ def get_frame_generator(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
             device=device,
+            det_batch_size=det_batch_size,
             fast_ball=fast_ball,
             ball_slice_wh=ball_slice_wh,
             ball_overlap_wh=ball_overlap_wh,

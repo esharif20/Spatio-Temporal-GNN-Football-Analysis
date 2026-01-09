@@ -146,6 +146,16 @@ Run with CUDA:
 
 `src/run.sh` accepts either a base clip name (looks in `src/input_videos/<clip>.mp4`) or a full path.
 
+Performance tips:
+
+- Override detection batch size with `--det-batch` (0=auto). Example:
+
+```bash
+!DEVICE=cuda bash src/run.sh all 0bfacc_0 --det-batch 64 --fresh
+```
+
+- For faster (lower‑accuracy) ball tracking, try `--fast-ball` or increase `--ball-slice` size.
+
 Default outputs are written to:
 
 ```

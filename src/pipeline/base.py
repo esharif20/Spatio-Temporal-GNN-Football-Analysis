@@ -37,6 +37,7 @@ def load_frames(source_video_path: str) -> List[np.ndarray]:
 
 def build_tracker(
     device: str | None,
+    det_batch_size: int,
     use_ball_model: bool,
     fast_ball: bool,
     ball_slice_wh: int,
@@ -62,6 +63,7 @@ def build_tracker(
 
     Args:
         device: Device for inference (cpu, cuda, mps)
+        det_batch_size: Detection batch size (0=auto)
         use_ball_model: Whether to use dedicated ball model
         ... (other ball tracking parameters)
 
@@ -73,6 +75,7 @@ def build_tracker(
         ball_model_path = str(BALL_DETECTION_MODEL_PATH)
 
     config = TrackerConfig(
+        det_batch_size=det_batch_size,
         imgsz=IMG_SIZE,
         conf=CONF_THRESHOLD,
         nms=NMS_IOU,

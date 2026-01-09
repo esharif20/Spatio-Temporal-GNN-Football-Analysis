@@ -37,6 +37,7 @@ def main() -> None:
         source_video_path=args.source_video_path,
         device=args.device,
         read_from_stub=not args.no_stub,
+        det_batch_size=args.det_batch,
         fast_ball=args.fast_ball,
         ball_slice_wh=args.ball_slice,
         ball_overlap_wh=args.ball_overlap,
@@ -68,4 +69,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

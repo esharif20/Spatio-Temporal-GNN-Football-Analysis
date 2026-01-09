@@ -25,6 +25,7 @@ BALL_MAX_ASPECT=""
 BALL_AREA_MIN=""
 BALL_AREA_MAX=""
 BALL_MAX_JUMP=""
+DET_BATCH=""
 
 lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
@@ -181,6 +182,14 @@ while [[ $# -gt 0 ]]; do
       BALL_MAX_JUMP="$2"
       shift 2
       ;;
+    --det-batch|--det-batch-size)
+      if [[ -z "${2:-}" ]]; then
+        echo "Missing value for --det-batch" >&2
+        exit 1
+      fi
+      DET_BATCH="$2"
+      shift 2
+      ;;
     --no-ball-model)
       NO_BALL_MODEL=1
       shift
@@ -305,6 +314,9 @@ if [[ -n "$BALL_MAX_JUMP" ]]; then
 fi
 if [[ "$NO_BALL_MODEL" -eq 1 ]]; then
   cmd+=(--no-ball-model)
+fi
+if [[ -n "$DET_BATCH" ]]; then
+  cmd+=(--det-batch "$DET_BATCH")
 fi
 if [[ "$NO_STUB" -eq 1 ]]; then
   cmd+=(--no_stub)
