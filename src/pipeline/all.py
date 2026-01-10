@@ -1,5 +1,6 @@
 """All pipeline mode - runs all stages."""
 
+from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
 import numpy as np
@@ -15,6 +16,7 @@ from config import (
     TEAM_MAX_CROPS,
     TEAM_MIN_CROP_SIZE,
     DEFAULT_VIDEO_FPS,
+    OUTPUT_DIR,
 )
 from utils.drawing import draw_keypoints
 from trackers.track_stabiliser import stabilise_tracks
@@ -30,7 +32,7 @@ from pitch import (
     draw_voronoi_on_frame,
 )
 from pitch.annotators import render_radar_overlay
-from analytics import AnalyticsEngine, print_analytics_summary
+from analytics import AnalyticsEngine, print_analytics_summary, export_analytics_json
 from . import Mode
 from .base import load_frames, build_tracker, get_stub_path
 
@@ -125,10 +127,8 @@ def run(
         if ball_config.conf_multiclass is not None:
             print(f"Ball conf (multi-class): {ball_config.conf_multiclass}")
 
-    print_ball_metrics(
-        compute_ball_metrics(tracks["ball"], tracker.ball_debug, conf_used),
-        label="Ball track",
-    )
+    ball_metrics = compute_ball_metrics(tracks["ball"], tracker.ball_debug, conf_used)
+    print_ball_metrics(ball_metrics, label="Ball track")
 
     # Pitch configuration for overlays
     pitch_config = SoccerPitchConfiguration()
@@ -183,6 +183,11 @@ def run(
                 frame_keypoints = np.array([])
                 pitch_keypoints = np.array([])
 
+            # Debug: log keypoint detection stats every 30 frames
+            if frame_idx % 30 == 0:
+                detected_indices = np.where(conf_mask)[0] if hasattr(conf_mask, '__len__') and len(conf_mask) > 0 else []
+                print(f"[Frame {frame_idx}] Keypoints: {len(frame_keypoints)}/32 detected (indices: {list(detected_indices)[:10]}{'...' if len(detected_indices) > 10 else ''})")
+
             # Draw keypoints on frame if requested
             if show_keypoints and len(frame_keypoints) > 0:
                 frame = draw_pitch_keypoints_on_frame(
@@ -215,10 +220,11 @@ def run(
                             x1, y1, x2, y2 = bbox
                             foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                             pitch_pos = transformer.transform_points(foot_pos)
-                            if team_id == 1:
+                            if team_id == 0:
                                 team_1_positions.append(pitch_pos[0])
-                            else:
+                            elif team_id == 1:
                                 team_2_positions.append(pitch_pos[0])
+                            # Skip players without team assignment
 
                     # Process goalkeepers
                     for track_id, track_data in goalkeepers_frame.items():
@@ -228,9 +234,9 @@ def run(
                             x1, y1, x2, y2 = bbox
                             foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                             pitch_pos = transformer.transform_points(foot_pos)
-                            if team_id == 1:
+                            if team_id == 0:
                                 team_1_positions.append(pitch_pos[0])
-                            else:
+                            elif team_id == 1:
                                 team_2_positions.append(pitch_pos[0])
 
                     team_1_xy = np.array(team_1_positions) if team_1_positions else np.empty((0, 2))
@@ -291,9 +297,9 @@ def run(
                             foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                             pitch_pos = transformer.transform_points(foot_pos)[0]
                             pitch_pos = smoother.smooth_position(track_id, pitch_pos)
-                            if team_id == 1:
+                            if team_id == 0:
                                 team_1_positions.append(pitch_pos)
-                            else:
+                            elif team_id == 1:
                                 team_2_positions.append(pitch_pos)
 
                     # Process goalkeepers
@@ -307,9 +313,9 @@ def run(
                             foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                             pitch_pos = transformer.transform_points(foot_pos)[0]
                             pitch_pos = smoother.smooth_position(gk_id, pitch_pos)
-                            if team_id == 1:
+                            if team_id == 0:
                                 team_1_positions.append(pitch_pos)
-                            else:
+                            elif team_id == 1:
                                 team_2_positions.append(pitch_pos)
 
                     # Process referees
@@ -395,8 +401,15 @@ def run(
 
         yield frame
 
-    # After all frames processed, print analytics summary
+    # After all frames processed, compute and export analytics
     if show_analytics and analytics_engine is not None:
         print("\nComputing analytics...")
-        result = analytics_engine.compute(tracks, transformer=None)
+        result = analytics_engine.compute(tracks, transformer=None, ball_metrics=ball_metrics)
         print_analytics_summary(result)
+
+        # Export analytics (including ball_metrics) to JSON in output directory
+        video_name = Path(source_video_path).stem
+        output_subdir = OUTPUT_DIR / video_name
+        output_subdir.mkdir(parents=True, exist_ok=True)
+        analytics_json_path = output_subdir / f"{video_name}_analytics.json"
+        export_analytics_json(result, str(analytics_json_path))

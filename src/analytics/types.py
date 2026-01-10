@@ -83,3 +83,4 @@ class AnalyticsResult:
     ball_path: BallPath
     fps: float
     homography_available: bool
+    ball_metrics: Optional[Dict] = None  # Ball tracking quality metrics

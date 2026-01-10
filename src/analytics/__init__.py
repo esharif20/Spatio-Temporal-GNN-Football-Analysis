@@ -56,12 +56,14 @@ class AnalyticsEngine:
         self,
         tracks: Dict[str, List[Dict]],
         transformer: Optional[ViewTransformer] = None,
+        ball_metrics: Optional[Dict] = None,
     ) -> AnalyticsResult:
         """Compute all analytics from tracks.
 
         Args:
             tracks: Full track dictionary with ball, players, goalkeepers, referees.
             transformer: ViewTransformer for real-world coordinates.
+            ball_metrics: Optional ball tracking quality metrics from compute_ball_metrics().
 
         Returns:
             AnalyticsResult with all computed metrics.
@@ -89,6 +91,7 @@ class AnalyticsEngine:
             ball_path=ball_path,
             fps=self.fps,
             homography_available=transformer is not None,
+            ball_metrics=ball_metrics,
         )
 
 
