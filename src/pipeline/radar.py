@@ -201,10 +201,10 @@ def run(
 
     for frame_idx, frame in enumerate(frames):
         # Get detections for this frame
-        players_frame = tracks.get("players", {}).get(frame_idx, {})
-        goalkeepers_frame = tracks.get("goalkeepers", {}).get(frame_idx, {})
-        referees_frame = tracks.get("referees", {}).get(frame_idx, {})
-        ball_frame = tracks.get("ball", {}).get(frame_idx, {})
+        players_frame = tracks["players"][frame_idx]
+        goalkeepers_frame = tracks["goalkeepers"][frame_idx]
+        referees_frame = tracks["referees"][frame_idx]
+        ball_frame = tracks["ball"][frame_idx]
 
         # Run pitch keypoint detection
         result = pitch_model(frame, verbose=False)[0]
