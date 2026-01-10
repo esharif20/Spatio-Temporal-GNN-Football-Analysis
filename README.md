@@ -359,6 +359,22 @@ Detection results are cached in `src/stubs/` to speed up re-runs:
 
 ---
 
+## Training
+
+Train custom models using these Colab notebooks:
+
+### Multi-Class Model Training
+Train YOLOv8 models for player and ball detection.
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esharif20/Spatio-Temporal-GNN-Football-Analysis/blob/main/src/training/Training_multi_class_model.ipynb)
+
+### Full Pipeline Training
+End-to-end training workflow for the complete analysis pipeline.
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/esharif20/Spatio-Temporal-GNN-Football-Analysis/blob/main/src/training/full_pipeline.ipynb)
+
+---
+
 ## Development
 
 ```bash

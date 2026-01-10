@@ -43,7 +43,8 @@ PLAYER_ID = 2
 REFEREE_ID = 3
 
 # Homography smoothing window
-HOMOGRAPHY_WINDOW = 5
+HOMOGRAPHY_WINDOW = 10
+HOMOGRAPHY_DECAY = 0.85  # Exponential decay for weighted average
 
 # Keypoint confidence threshold
 KEYPOINT_CONF_THRESHOLD = 0.5
@@ -136,9 +137,18 @@ def run(
     # Pitch configuration
     pitch_config = SoccerPitchConfiguration()
 
-    # Team colors for radar
-    team_1_color = sv.Color.from_hex('#00BFFF')  # Cyan
-    team_2_color = sv.Color.from_hex('#FF1493')  # Pink
+    # Team colors for radar - use computed colors if available, fallback to defaults
+    if team_colors and 0 in team_colors:
+        bgr = team_colors[0]
+        team_1_color = sv.Color(bgr[2], bgr[1], bgr[0])  # BGR to RGB
+    else:
+        team_1_color = sv.Color.from_hex('#00BFFF')  # Cyan fallback
+
+    if team_colors and 1 in team_colors:
+        bgr = team_colors[1]
+        team_2_color = sv.Color(bgr[2], bgr[1], bgr[0])  # BGR to RGB
+    else:
+        team_2_color = sv.Color.from_hex('#FF1493')  # Pink fallback
     referee_color = sv.Color.from_hex('#FFD700')  # Gold
     ball_color = sv.Color.WHITE
     ball_path_color = sv.Color.from_hex('#FF6600')  # Orange
@@ -191,10 +201,17 @@ def run(
                     target=pitch_keypoints.astype(np.float32)
                 )
 
-                # Smooth homography using moving average
+                # Smooth homography using exponentially weighted moving average
                 homography_buffer.append(transformer.matrix)
                 if len(homography_buffer) > 1:
-                    transformer.matrix = np.mean(np.array(list(homography_buffer)), axis=0)
+                    matrices = np.array(list(homography_buffer))
+                    n = len(matrices)
+                    # Exponentially weighted: recent frames get higher weight
+                    weights = np.power(HOMOGRAPHY_DECAY, np.arange(n - 1, -1, -1))
+                    weights = weights / weights.sum()
+                    transformer.matrix = np.sum(
+                        matrices * weights[:, np.newaxis, np.newaxis], axis=0
+                    )
 
                 # Extract player positions from tracks
                 team_1_positions = []
@@ -205,7 +222,7 @@ def run(
                 # Process players
                 for track_id, track_data in players_frame.items():
                     bbox = track_data.get("bbox")
-                    team_id = track_data.get("team")
+                    team_id = track_data.get("team_id")
                     if bbox is not None:
                         # Get bottom center of bbox
                         x1, y1, x2, y2 = bbox
@@ -219,7 +236,7 @@ def run(
                 # Process goalkeepers (add to respective teams)
                 for track_id, track_data in goalkeepers_frame.items():
                     bbox = track_data.get("bbox")
-                    team_id = track_data.get("team")
+                    team_id = track_data.get("team_id")
                     if bbox is not None:
                         x1, y1, x2, y2 = bbox
                         foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
@@ -243,7 +260,8 @@ def run(
                     bbox = track_data.get("bbox")
                     if bbox is not None:
                         x1, y1, x2, y2 = bbox
-                        ball_center = np.array([[(x1 + x2) / 2, (y1 + y2) / 2]], dtype=np.float32)
+                        # Use bottom center as ground projection (like players)
+                        ball_center = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                         pitch_pos = transformer.transform_points(ball_center)
                         ball_positions.append(pitch_pos[0])
                         # Accumulate for ball path
