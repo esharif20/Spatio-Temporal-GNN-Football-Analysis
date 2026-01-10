@@ -1,9 +1,12 @@
 """Pipeline modes and frame generator factory."""
 
 from enum import Enum
-from typing import Iterator
+from typing import Iterator, TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from trackers.ball_config import BallConfig
 
 
 class Mode(Enum):
@@ -24,24 +27,8 @@ def get_frame_generator(
     read_from_stub: bool,
     det_batch_size: int,
     fast_ball: bool,
-    ball_slice_wh: int,
-    ball_overlap_wh: int,
-    ball_slicer_iou: float,
-    ball_slicer_workers: int,
-    ball_imgsz: int,
-    ball_conf: float,
-    ball_conf_multiclass: float | None,
+    ball_config: "BallConfig",
     use_ball_model_weights: bool,
-    ball_tile_grid: tuple[int, int] | None,
-    ball_use_kalman: bool,
-    ball_kalman_predict: bool,
-    ball_kalman_max_gap: int,
-    ball_auto_area: bool,
-    ball_acquire_conf: float,
-    ball_max_aspect: float,
-    ball_area_ratio_min: float,
-    ball_area_ratio_max: float,
-    ball_max_jump_ratio: float,
     # Radar mode options
     show_voronoi: bool = False,
     show_ball_path: bool = True,
@@ -54,7 +41,9 @@ def get_frame_generator(
         device: Device for inference (cpu, cuda, mps)
         read_from_stub: Whether to read from cached stubs
         det_batch_size: Detection batch size (0=auto)
-        ... (ball tracking parameters)
+        fast_ball: Disable slicer for speed
+        ball_config: Ball tracking configuration
+        use_ball_model_weights: Whether to use dedicated ball model weights
 
     Returns:
         Iterator yielding annotated frames
@@ -88,24 +77,8 @@ def get_frame_generator(
             device=device,
             det_batch_size=det_batch_size,
             fast_ball=fast_ball,
-            ball_slice_wh=ball_slice_wh,
-            ball_overlap_wh=ball_overlap_wh,
-            ball_slicer_iou=ball_slicer_iou,
-            ball_slicer_workers=ball_slicer_workers,
-            ball_imgsz=ball_imgsz,
-            ball_conf=ball_conf,
-            ball_conf_multiclass=ball_conf_multiclass,
+            ball_config=ball_config,
             use_ball_model_weights=use_ball_model_weights,
-            ball_tile_grid=ball_tile_grid,
-            ball_use_kalman=ball_use_kalman,
-            ball_kalman_predict=ball_kalman_predict,
-            ball_kalman_max_gap=ball_kalman_max_gap,
-            ball_auto_area=ball_auto_area,
-            ball_acquire_conf=ball_acquire_conf,
-            ball_max_aspect=ball_max_aspect,
-            ball_area_ratio_min=ball_area_ratio_min,
-            ball_area_ratio_max=ball_area_ratio_max,
-            ball_max_jump_ratio=ball_max_jump_ratio,
         )
 
     if mode == Mode.PLAYER_TRACKING:
@@ -123,24 +96,8 @@ def get_frame_generator(
             device=device,
             det_batch_size=det_batch_size,
             fast_ball=fast_ball,
-            ball_slice_wh=ball_slice_wh,
-            ball_overlap_wh=ball_overlap_wh,
-            ball_slicer_iou=ball_slicer_iou,
-            ball_slicer_workers=ball_slicer_workers,
-            ball_imgsz=ball_imgsz,
-            ball_conf=ball_conf,
-            ball_conf_multiclass=ball_conf_multiclass,
+            ball_config=ball_config,
             use_ball_model_weights=use_ball_model_weights,
-            ball_tile_grid=ball_tile_grid,
-            ball_use_kalman=ball_use_kalman,
-            ball_kalman_predict=ball_kalman_predict,
-            ball_kalman_max_gap=ball_kalman_max_gap,
-            ball_auto_area=ball_auto_area,
-            ball_acquire_conf=ball_acquire_conf,
-            ball_max_aspect=ball_max_aspect,
-            ball_area_ratio_min=ball_area_ratio_min,
-            ball_area_ratio_max=ball_area_ratio_max,
-            ball_max_jump_ratio=ball_max_jump_ratio,
         )
 
     if mode == Mode.ALL:
@@ -150,24 +107,8 @@ def get_frame_generator(
             device=device,
             det_batch_size=det_batch_size,
             fast_ball=fast_ball,
-            ball_slice_wh=ball_slice_wh,
-            ball_overlap_wh=ball_overlap_wh,
-            ball_slicer_iou=ball_slicer_iou,
-            ball_slicer_workers=ball_slicer_workers,
-            ball_imgsz=ball_imgsz,
-            ball_conf=ball_conf,
-            ball_conf_multiclass=ball_conf_multiclass,
+            ball_config=ball_config,
             use_ball_model_weights=use_ball_model_weights,
-            ball_tile_grid=ball_tile_grid,
-            ball_use_kalman=ball_use_kalman,
-            ball_kalman_predict=ball_kalman_predict,
-            ball_kalman_max_gap=ball_kalman_max_gap,
-            ball_auto_area=ball_auto_area,
-            ball_acquire_conf=ball_acquire_conf,
-            ball_max_aspect=ball_max_aspect,
-            ball_area_ratio_min=ball_area_ratio_min,
-            ball_area_ratio_max=ball_area_ratio_max,
-            ball_max_jump_ratio=ball_max_jump_ratio,
         )
 
     if mode == Mode.RADAR:
@@ -179,24 +120,8 @@ def get_frame_generator(
             device=device,
             det_batch_size=det_batch_size,
             fast_ball=fast_ball,
-            ball_slice_wh=ball_slice_wh,
-            ball_overlap_wh=ball_overlap_wh,
-            ball_slicer_iou=ball_slicer_iou,
-            ball_slicer_workers=ball_slicer_workers,
-            ball_imgsz=ball_imgsz,
-            ball_conf=ball_conf,
-            ball_conf_multiclass=ball_conf_multiclass,
+            ball_config=ball_config,
             use_ball_model_weights=use_ball_model_weights,
-            ball_tile_grid=ball_tile_grid,
-            ball_use_kalman=ball_use_kalman,
-            ball_kalman_predict=ball_kalman_predict,
-            ball_kalman_max_gap=ball_kalman_max_gap,
-            ball_auto_area=ball_auto_area,
-            ball_acquire_conf=ball_acquire_conf,
-            ball_max_aspect=ball_max_aspect,
-            ball_area_ratio_min=ball_area_ratio_min,
-            ball_area_ratio_max=ball_area_ratio_max,
-            ball_max_jump_ratio=ball_max_jump_ratio,
             show_voronoi=show_voronoi,
             show_ball_path=show_ball_path,
         )

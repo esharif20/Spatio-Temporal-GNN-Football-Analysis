@@ -1,7 +1,7 @@
 """Radar/tactical view pipeline mode - projects players onto 2D pitch."""
 
 from collections import deque
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, TYPE_CHECKING
 
 import numpy as np
 import supervision as sv
@@ -11,23 +11,6 @@ from config import (
     PITCH_DETECTION_MODEL_PATH,
     BALL_DETECTION_MODEL_PATH,
     CONF_THRESHOLD,
-    BALL_SLICE_WH,
-    BALL_OVERLAP_WH,
-    BALL_SLICER_IOU,
-    BALL_SLICER_WORKERS,
-    BALL_MODEL_IMG_SIZE,
-    BALL_MODEL_CONF,
-    BALL_MULTI_CONF,
-    BALL_TILE_GRID,
-    BALL_USE_KALMAN,
-    BALL_KALMAN_PREDICT,
-    BALL_KALMAN_MAX_GAP,
-    BALL_AUTO_AREA,
-    BALL_ACQUIRE_CONF,
-    BALL_MAX_ASPECT,
-    BALL_AREA_RATIO_MIN,
-    BALL_AREA_RATIO_MAX,
-    BALL_MAX_JUMP_RATIO,
     TEAM_STRIDE,
     TEAM_BATCH_SIZE,
     TEAM_MAX_CROPS,
@@ -49,6 +32,9 @@ from team_assigner import TeamAssigner, TeamAssignerConfig
 from . import Mode
 from .base import load_frames, build_tracker, get_stub_path
 
+if TYPE_CHECKING:
+    from trackers.ball_config import BallConfig
+
 
 # Class IDs in the detection model
 BALL_ID = 0
@@ -68,25 +54,9 @@ def run(
     read_from_stub: bool,
     device: str,
     det_batch_size: int,
-    fast_ball: bool = False,
-    ball_slice_wh: int = BALL_SLICE_WH,
-    ball_overlap_wh: int = BALL_OVERLAP_WH,
-    ball_slicer_iou: float = BALL_SLICER_IOU,
-    ball_slicer_workers: int = BALL_SLICER_WORKERS,
-    ball_imgsz: int = BALL_MODEL_IMG_SIZE,
-    ball_conf: float = BALL_MODEL_CONF,
-    ball_conf_multiclass: float | None = BALL_MULTI_CONF,
-    use_ball_model_weights: bool = True,
-    ball_tile_grid: tuple[int, int] | None = BALL_TILE_GRID,
-    ball_use_kalman: bool = BALL_USE_KALMAN,
-    ball_kalman_predict: bool = BALL_KALMAN_PREDICT,
-    ball_kalman_max_gap: int = BALL_KALMAN_MAX_GAP,
-    ball_auto_area: bool = BALL_AUTO_AREA,
-    ball_acquire_conf: float = BALL_ACQUIRE_CONF,
-    ball_max_aspect: float = BALL_MAX_ASPECT,
-    ball_area_ratio_min: float = BALL_AREA_RATIO_MIN,
-    ball_area_ratio_max: float = BALL_AREA_RATIO_MAX,
-    ball_max_jump_ratio: float = BALL_MAX_JUMP_RATIO,
+    fast_ball: bool,
+    ball_config: "BallConfig",
+    use_ball_model_weights: bool,
     show_voronoi: bool = False,
     show_ball_path: bool = True,
     show_analytics: bool = True,
@@ -101,7 +71,9 @@ def run(
         read_from_stub: Whether to read from cached stubs
         device: Device for inference (cpu, cuda, mps)
         det_batch_size: Detection batch size (0=auto)
-        ... (ball tracking parameters)
+        fast_ball: Disable slicer for speed
+        ball_config: Ball tracking configuration
+        use_ball_model_weights: Whether to use dedicated ball model weights
         show_voronoi: Whether to show Voronoi control diagram
         show_ball_path: Whether to draw ball trajectory on radar
         show_analytics: Whether to print analytics summary at end
@@ -130,24 +102,8 @@ def run(
         det_batch_size=det_batch_size,
         use_ball_model=True,
         fast_ball=fast_ball,
-        ball_slice_wh=ball_slice_wh,
-        ball_overlap_wh=ball_overlap_wh,
-        ball_slicer_iou=ball_slicer_iou,
-        ball_slicer_workers=ball_slicer_workers,
-        ball_imgsz=ball_imgsz,
-        ball_conf=ball_conf,
-        ball_conf_multiclass=ball_conf_multiclass,
+        ball_config=ball_config,
         use_ball_model_weights=use_ball_model_weights,
-        ball_tile_grid=ball_tile_grid,
-        ball_use_kalman=ball_use_kalman,
-        ball_kalman_predict=ball_kalman_predict,
-        ball_kalman_max_gap=ball_kalman_max_gap,
-        ball_auto_area=ball_auto_area,
-        ball_acquire_conf=ball_acquire_conf,
-        ball_max_aspect=ball_max_aspect,
-        ball_area_ratio_min=ball_area_ratio_min,
-        ball_area_ratio_max=ball_area_ratio_max,
-        ball_max_jump_ratio=ball_max_jump_ratio,
     )
 
     tracks = tracker.get_object_tracks(

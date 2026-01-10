@@ -27,6 +27,7 @@ from ultralytics import YOLO
 # Local modules
 from utils.bbox_utils import get_center_of_bbox, get_bbox_width
 from .ball_tracker import BallAnnotator, BallTracker
+from .ball_config import BallConfig
 
 # =============================================================================
 # Tracker Class
@@ -37,6 +38,7 @@ class Tracker:
 
     @dataclass
     class Config:
+        # General detection params
         imgsz: int = 1280
         conf: float = 0.25
         nms: float = 0.70
@@ -45,28 +47,18 @@ class Tracker:
         max_det: int = 300
         det_batch_size: int = 0
         ball_model_path: Optional[str] = None
-        ball_imgsz: int = 640
-        ball_conf: float = 0.25
-        ball_conf_multiclass: Optional[float] = None
+
+        # Ball configuration - all ball params in one object
+        ball_config: Optional[BallConfig] = None
+
+        # Ball slicer enable (not in BallConfig - controls mode, not params)
         ball_use_slicer: bool = True
-        ball_slice_wh: int | tuple[int, int] = 640
-        ball_overlap_wh: int | tuple[int, int] = 100
-        ball_slicer_iou: float = 0.10
-        ball_slicer_workers: int = 1
-        ball_tile_grid: Optional[tuple[int, int]] = None
-        ball_use_kalman: bool = False
-        ball_kalman_predict: bool = False
-        ball_kalman_max_gap: int = 10
-        ball_auto_area: bool = False
+
+        # Additional auto-area params (not in BallConfig)
         ball_auto_area_window: int = 60
         ball_auto_area_margin: float = 0.5
         ball_auto_area_expand_min: float = 0.4
         ball_auto_area_expand_max: float = 2.0
-        ball_acquire_conf: float = 0.25
-        ball_max_aspect: float = 3.0
-        ball_area_ratio_min: float = 0.25
-        ball_area_ratio_max: float = 4.0
-        ball_max_jump_ratio: float = 8.0
 
     Config = Config
 
@@ -96,6 +88,7 @@ class Tracker:
 
         self.class_names = self._normalize_class_names(self.model.names)
 
+        # General detection params
         self.imgsz = int(cfg.imgsz)
         self.conf = float(cfg.conf)
         self.nms = float(cfg.nms)
@@ -103,29 +96,16 @@ class Tracker:
         self.pad_ball = int(cfg.pad_ball)
         self.max_det = int(cfg.max_det)
         self.det_batch_size = max(0, int(cfg.det_batch_size))
-        self.ball_imgsz = int(cfg.ball_imgsz)
-        self.ball_conf = float(cfg.ball_conf)
-        self.ball_conf_multiclass = (
-            float(cfg.ball_conf_multiclass)
-            if cfg.ball_conf_multiclass is not None
-            else None
-        )
-        self.ball_acquire_conf = float(cfg.ball_acquire_conf)
-        self.ball_max_aspect = float(cfg.ball_max_aspect)
-        self.ball_area_ratio_min = float(cfg.ball_area_ratio_min)
-        self.ball_area_ratio_max = float(cfg.ball_area_ratio_max)
-        self.ball_max_jump_ratio = float(cfg.ball_max_jump_ratio)
-        self.ball_tile_grid = cfg.ball_tile_grid
-        self.ball_use_kalman = bool(cfg.ball_use_kalman)
-        self.ball_kalman_predict = bool(cfg.ball_kalman_predict)
-        self.ball_kalman_max_gap = max(0, int(cfg.ball_kalman_max_gap))
-        self.ball_auto_area = bool(cfg.ball_auto_area)
+
+        # Ball config (use provided or create default)
+        self.ball_config = cfg.ball_config or BallConfig.from_defaults()
+
+        # These come from Tracker.Config, not BallConfig
+        self.ball_use_slicer = bool(cfg.ball_use_slicer)
         self.ball_auto_area_window = max(1, int(cfg.ball_auto_area_window))
         self.ball_auto_area_margin = float(cfg.ball_auto_area_margin)
         self.ball_auto_area_expand_min = float(cfg.ball_auto_area_expand_min)
         self.ball_auto_area_expand_max = float(cfg.ball_auto_area_expand_max)
-        self.ball_use_slicer = bool(cfg.ball_use_slicer)
-        self.ball_slicer_iou = float(cfg.ball_slicer_iou)
 
         self.ball_model = None
         self.ball_model_names: Dict[int, str] = {}
@@ -136,7 +116,7 @@ class Tracker:
             self.ball_model = YOLO(cfg.ball_model_path)
             # Keep ball model on CPU when using slicer - many small sequential
             # calls are faster without GPU transfer overhead
-            if not (self.ball_use_slicer or self.ball_tile_grid):
+            if not (self.ball_use_slicer or self.ball_config.tile_grid):
                 self._select_device(self.ball_model, device)
             self.ball_model_names = self._normalize_class_names(self.ball_model.names)
             self.ball_model_class_id = self._resolve_class_id(
@@ -144,17 +124,17 @@ class Tracker:
             )
             self._ball_model_lock = threading.Lock()
             print(f"Ball model classes: {self.ball_model_names}")
-            if self.ball_tile_grid:
-                rows, cols = self.ball_tile_grid
-                print(f"Ball tiling: {rows}x{cols} -> imgsz {self.ball_imgsz}")
+            if self.ball_config.tile_grid:
+                rows, cols = self.ball_config.tile_grid
+                print(f"Ball tiling: {rows}x{cols} -> imgsz {self.ball_config.imgsz}")
             elif self.ball_use_slicer:
                 def callback(image_slice: np.ndarray) -> sv.Detections:
                     lock = self._ball_model_lock
                     if lock is None:
                         result = self.ball_model.predict(
                             image_slice,
-                            conf=self.ball_conf,
-                            imgsz=self.ball_imgsz,
+                            conf=self.ball_config.conf,
+                            imgsz=self.ball_config.imgsz,
                             max_det=self.max_det,
                             verbose=False,
                         )[0]
@@ -162,8 +142,8 @@ class Tracker:
                         with lock:
                             result = self.ball_model.predict(
                                 image_slice,
-                                conf=self.ball_conf,
-                                imgsz=self.ball_imgsz,
+                                conf=self.ball_config.conf,
+                                imgsz=self.ball_config.imgsz,
                                 max_det=self.max_det,
                                 verbose=False,
                             )[0]
@@ -171,10 +151,10 @@ class Tracker:
 
                 self.ball_slicer = sv.InferenceSlicer(
                     callback=callback,
-                    slice_wh=cfg.ball_slice_wh,
-                    overlap_wh=cfg.ball_overlap_wh,
+                    slice_wh=self.ball_config.slice_wh,
+                    overlap_wh=self.ball_config.overlap_wh,
                     overlap_filter=sv.OverlapFilter.NONE,
-                    thread_workers=int(cfg.ball_slicer_workers),
+                    thread_workers=self.ball_config.slicer_workers,
                 )
 
         self.tracker = sv.ByteTrack()
@@ -205,9 +185,9 @@ class Tracker:
         )
         self.ball_tracker = BallTracker(
             buffer_size=10,
-            use_kalman=self.ball_use_kalman,
-            predict_on_missing=self.ball_kalman_predict,
-            max_missing=self.ball_kalman_max_gap,
+            use_kalman=self.ball_config.use_kalman,
+            predict_on_missing=self.ball_config.kalman_predict,
+            max_missing=self.ball_config.kalman_max_gap,
         )
         self.ball_annotator = BallAnnotator(radius=6, buffer_size=10)
 
@@ -431,19 +411,19 @@ class Tracker:
         candidates: List[sv.Detections] = []
 
         if self.ball_model is not None:
-            if self.ball_tile_grid:
+            if self.ball_config.tile_grid:
                 dets = self._run_ball_tiles(frame)
                 if len(dets):
-                    dets = dets.with_nms(threshold=self.ball_slicer_iou)
+                    dets = dets.with_nms(threshold=self.ball_config.slicer_iou)
             elif self.ball_slicer is not None:
                 dets = self.ball_slicer(frame)
                 if len(dets):
-                    dets = dets.with_nms(threshold=self.ball_slicer_iou)
+                    dets = dets.with_nms(threshold=self.ball_config.slicer_iou)
             else:
                 result = self.ball_model.predict(
                     frame,
-                    conf=self.ball_conf,
-                    imgsz=self.ball_imgsz,
+                    conf=self.ball_config.conf,
+                    imgsz=self.ball_config.imgsz,
                     max_det=self.max_det,
                     verbose=False,
                 )[0]
@@ -464,11 +444,11 @@ class Tracker:
             if dets_main is not None and len(dets_main) > 0:
                 main_ball = dets_main[dets_main.class_id == int(ball_cls)]
                 if (
-                    self.ball_conf_multiclass is not None
+                    self.ball_config.conf_multiclass is not None
                     and main_ball.confidence is not None
                     and len(main_ball) > 0
                 ):
-                    main_ball = main_ball[main_ball.confidence >= self.ball_conf_multiclass]
+                    main_ball = main_ball[main_ball.confidence >= self.ball_config.conf_multiclass]
                 if len(main_ball) > 0:
                     candidates.append(main_ball)
 
@@ -483,7 +463,7 @@ class Tracker:
             reject_area: int,
             reject_jump: int,
         ) -> None:
-            if self.ball_use_kalman and self.ball_kalman_predict:
+            if self.ball_config.use_kalman and self.ball_config.kalman_predict:
                 predicted = self.ball_tracker.update(sv.Detections.empty())
                 if len(predicted) > 0:
                     if self.pad_ball > 0:
@@ -547,14 +527,14 @@ class Tracker:
         else:
             ball_dets = sv.Detections.merge(detections_list=candidates)
             if len(ball_dets):
-                ball_dets = ball_dets.with_nms(threshold=self.ball_slicer_iou)
+                ball_dets = ball_dets.with_nms(threshold=self.ball_config.slicer_iou)
 
         raw_count = len(ball_dets)
         post_conf = raw_count
         reject_conf = 0
 
         if ball_dets.confidence is not None:
-            conf_thresh = self.ball_conf if self.ball_model is not None else self.conf
+            conf_thresh = self.ball_config.conf if self.ball_model is not None else self.conf
             keep = ball_dets.confidence >= conf_thresh
             post_conf = int(keep.sum())
             reject_conf = raw_count - post_conf
@@ -577,7 +557,7 @@ class Tracker:
         widths = xyxy[:, 2] - xyxy[:, 0]
         heights = xyxy[:, 3] - xyxy[:, 1]
         aspect = np.maximum(widths / (heights + 1e-6), heights / (widths + 1e-6))
-        aspect_keep = aspect <= self.ball_max_aspect
+        aspect_keep = aspect <= self.ball_config.max_aspect
         reject_aspect = int((~aspect_keep).sum())
         ball_dets = ball_dets[aspect_keep]
         post_aspect = len(ball_dets)
@@ -614,7 +594,7 @@ class Tracker:
         gate_keep = np.ones((len(ball_dets),), dtype=bool)
 
         if last_bbox is None:
-            gate_keep = confs >= self.ball_acquire_conf
+            gate_keep = confs >= self.ball_config.acquire_conf
             reject_acquire = int((~gate_keep).sum())
         else:
             last_bbox = np.array(last_bbox, dtype=np.float32)
@@ -623,9 +603,9 @@ class Tracker:
             last_area = last_w * last_h
             areas = widths * heights
             area_ratio = areas / max(last_area, 1e-6)
-            min_ratio = self.ball_area_ratio_min
-            max_ratio = self.ball_area_ratio_max
-            if self.ball_auto_area:
+            min_ratio = self.ball_config.area_ratio_min
+            max_ratio = self.ball_config.area_ratio_max
+            if self.ball_config.auto_area:
                 min_ratio *= self.ball_auto_area_expand_min
                 max_ratio *= self.ball_auto_area_expand_max
                 if self.ball_area_ratios:
@@ -647,8 +627,8 @@ class Tracker:
                 dtype=np.float32,
             )
             distances = np.linalg.norm(centers - last_center, axis=1)
-            max_jump = max(last_w, last_h) * self.ball_max_jump_ratio + 50.0
-            jump_keep = (distances <= max_jump) | (confs >= self.ball_acquire_conf)
+            max_jump = max(last_w, last_h) * self.ball_config.max_jump_ratio + 50.0
+            jump_keep = (distances <= max_jump) | (confs >= self.ball_config.acquire_conf)
             reject_jump = int((~jump_keep).sum())
             gate_keep = area_keep & jump_keep
 
@@ -698,7 +678,7 @@ class Tracker:
             ball_info["interpolated"] = True
             ball_info["predicted"] = True
         tracks["ball"][frame_num][1] = ball_info
-        if self.ball_auto_area and last_area is not None and not is_predicted:
+        if self.ball_config.auto_area and last_area is not None and not is_predicted:
             current_bbox = np.array(bbox, dtype=np.float32)
             current_w = max(1.0, current_bbox[2] - current_bbox[0])
             current_h = max(1.0, current_bbox[3] - current_bbox[1])
@@ -720,10 +700,10 @@ class Tracker:
         )
 
     def _run_ball_tiles(self, frame: np.ndarray) -> sv.Detections:
-        if self.ball_model is None or self.ball_tile_grid is None:
+        if self.ball_model is None or self.ball_config.tile_grid is None:
             return sv.Detections.empty()
 
-        rows, cols = self.ball_tile_grid
+        rows, cols = self.ball_config.tile_grid
         if rows <= 0 or cols <= 0:
             return sv.Detections.empty()
 
@@ -743,11 +723,11 @@ class Tracker:
                     continue
 
                 tile = frame[y0:y1, x0:x1]
-                resized = cv2.resize(tile, (self.ball_imgsz, self.ball_imgsz))
+                resized = cv2.resize(tile, (self.ball_config.imgsz, self.ball_config.imgsz))
                 result = self.ball_model.predict(
                     resized,
-                    conf=self.ball_conf,
-                    imgsz=self.ball_imgsz,
+                    conf=self.ball_config.conf,
+                    imgsz=self.ball_config.imgsz,
                     max_det=self.max_det,
                     verbose=False,
                 )[0]
@@ -755,8 +735,8 @@ class Tracker:
                 if dets is None or len(dets) == 0:
                     continue
 
-                scale_x = (x1 - x0) / float(self.ball_imgsz)
-                scale_y = (y1 - y0) / float(self.ball_imgsz)
+                scale_x = (x1 - x0) / float(self.ball_config.imgsz)
+                scale_y = (y1 - y0) / float(self.ball_config.imgsz)
                 dets.xyxy = dets.xyxy * np.array([scale_x, scale_y, scale_x, scale_y], dtype=np.float32)
                 dets.xyxy[:, [0, 2]] += x0
                 dets.xyxy[:, [1, 3]] += y0

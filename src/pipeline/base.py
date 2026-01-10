@@ -1,7 +1,7 @@
 """Shared pipeline utilities."""
 
 from pathlib import Path
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import numpy as np
 
@@ -18,6 +18,7 @@ from config import (
 from utils.video_utils import read_video
 from utils.cache import stub_path
 from trackers.tracker import Tracker, TrackerConfig
+from trackers.ball_config import BallConfig
 
 # Re-export for backward compatibility
 get_stub_path = stub_path
@@ -43,24 +44,8 @@ def build_tracker(
     det_batch_size: int,
     use_ball_model: bool,
     fast_ball: bool,
-    ball_slice_wh: int,
-    ball_overlap_wh: int,
-    ball_slicer_iou: float,
-    ball_slicer_workers: int,
-    ball_imgsz: int,
-    ball_conf: float,
-    ball_conf_multiclass: float | None,
+    ball_config: BallConfig,
     use_ball_model_weights: bool,
-    ball_tile_grid: tuple[int, int] | None,
-    ball_use_kalman: bool,
-    ball_kalman_predict: bool,
-    ball_kalman_max_gap: int,
-    ball_auto_area: bool,
-    ball_acquire_conf: float,
-    ball_max_aspect: float,
-    ball_area_ratio_min: float,
-    ball_area_ratio_max: float,
-    ball_max_jump_ratio: float,
 ) -> Tracker:
     """Build tracker with configuration.
 
@@ -68,7 +53,9 @@ def build_tracker(
         device: Device for inference (cpu, cuda, mps)
         det_batch_size: Detection batch size (0=auto)
         use_ball_model: Whether to use dedicated ball model
-        ... (other ball tracking parameters)
+        fast_ball: Disable slicer for speed
+        ball_config: Ball tracking configuration
+        use_ball_model_weights: Whether to use dedicated ball model weights
 
     Returns:
         Configured Tracker instance
@@ -86,24 +73,8 @@ def build_tracker(
         ball_id=BALL_CLASS_ID,
         pad_ball=PAD_BALL,
         ball_model_path=ball_model_path,
-        ball_imgsz=ball_imgsz,
-        ball_conf=ball_conf,
-        ball_conf_multiclass=ball_conf_multiclass,
-        ball_use_slicer=not fast_ball,
-        ball_slice_wh=ball_slice_wh,
-        ball_overlap_wh=ball_overlap_wh,
-        ball_slicer_iou=ball_slicer_iou,
-        ball_slicer_workers=ball_slicer_workers,
-        ball_tile_grid=ball_tile_grid,
-        ball_use_kalman=ball_use_kalman,
-        ball_kalman_predict=ball_kalman_predict,
-        ball_kalman_max_gap=ball_kalman_max_gap,
-        ball_auto_area=ball_auto_area,
-        ball_acquire_conf=ball_acquire_conf,
-        ball_max_aspect=ball_max_aspect,
-        ball_area_ratio_min=ball_area_ratio_min,
-        ball_area_ratio_max=ball_area_ratio_max,
-        ball_max_jump_ratio=ball_max_jump_ratio,
+        ball_config=ball_config,  # Pass BallConfig directly
+        ball_use_slicer=not fast_ball,  # Slicer enable/disable still external
     )
     tracker = Tracker(model_path=str(PLAYER_DETECTION_MODEL_PATH), config=config, device=device)
 
@@ -112,6 +83,6 @@ def build_tracker(
             print("Ball model: fallback to multi-class model")
         else:
             print(f"Ball model: {ball_model_path}")
-            print(f"Ball conf: {ball_conf}")
+            print(f"Ball conf: {ball_config.conf}")
 
     return tracker
