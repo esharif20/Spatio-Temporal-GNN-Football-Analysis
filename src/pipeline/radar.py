@@ -24,6 +24,8 @@ from pitch import (
     draw_points_on_pitch,
     draw_pitch_voronoi_diagram,
     draw_ball_trajectory,
+    draw_pitch_keypoints_on_frame,
+    draw_voronoi_on_frame,
 )
 from pitch.annotators import render_radar_overlay
 from analytics import AnalyticsEngine, BallPathTracker, print_analytics_summary
@@ -60,6 +62,9 @@ def run(
     use_ball_model_weights: bool,
     show_voronoi: bool = False,
     show_ball_path: bool = True,
+    ball_only: bool = False,
+    show_keypoints: bool = False,
+    voronoi_overlay: bool = False,
     show_analytics: bool = True,
     radar_opacity: float = 0.6,
     radar_scale: float = 0.4,
@@ -75,8 +80,11 @@ def run(
         fast_ball: Disable slicer for speed
         ball_config: Ball tracking configuration
         use_ball_model_weights: Whether to use dedicated ball model weights
-        show_voronoi: Whether to show Voronoi control diagram
+        show_voronoi: Whether to show Voronoi control diagram on radar
         show_ball_path: Whether to draw ball trajectory on radar
+        ball_only: Whether to show only ball on radar (hide players/referees)
+        show_keypoints: Whether to project pitch keypoints onto video frame
+        voronoi_overlay: Whether to project Voronoi diagram onto video frame
         show_analytics: Whether to print analytics summary at end
         radar_opacity: Opacity of radar overlay (0-1)
         radar_scale: Scale of radar relative to frame width
@@ -193,6 +201,15 @@ def run(
             "ball": {0: ball_frame},
         })[0]
 
+        # Project pitch keypoints onto frame if requested
+        if show_keypoints and len(frame_keypoints) > 0:
+            annotated_frame = draw_pitch_keypoints_on_frame(
+                frame=annotated_frame,
+                frame_keypoints=frame_keypoints,
+                pitch_config=pitch_config,
+                detected_indices=conf_mask,
+            )
+
         # Check if we have enough keypoints for homography
         if len(frame_keypoints) >= 4:
             try:
@@ -274,8 +291,22 @@ def run(
                 referee_xy = np.array(referee_positions) if referee_positions else np.empty((0, 2))
                 ball_xy = np.array(ball_positions) if ball_positions else np.empty((0, 2))
 
+                # Project Voronoi onto video frame if requested
+                if voronoi_overlay and team_1_xy.size > 0 and team_2_xy.size > 0:
+                    annotated_frame = draw_voronoi_on_frame(
+                        frame=annotated_frame,
+                        frame_keypoints=frame_keypoints,
+                        pitch_keypoints=pitch_keypoints,
+                        team_1_pitch_xy=team_1_xy,
+                        team_2_pitch_xy=team_2_xy,
+                        pitch_config=pitch_config,
+                        team_1_color=team_1_color,
+                        team_2_color=team_2_color,
+                        opacity=0.3,
+                    )
+
                 # Draw radar
-                if show_voronoi and team_1_xy.size > 0 and team_2_xy.size > 0:
+                if show_voronoi and not ball_only and team_1_xy.size > 0 and team_2_xy.size > 0:
                     radar = draw_pitch_voronoi_diagram(
                         config=pitch_config,
                         team_1_xy=team_1_xy,
@@ -300,31 +331,34 @@ def run(
                         pitch=radar,
                     )
 
-                # Draw players on radar
-                radar = draw_points_on_pitch(
-                    config=pitch_config,
-                    xy=team_1_xy,
-                    face_color=team_1_color,
-                    edge_color=sv.Color.BLACK,
-                    radius=16,
-                    pitch=radar
-                )
-                radar = draw_points_on_pitch(
-                    config=pitch_config,
-                    xy=team_2_xy,
-                    face_color=team_2_color,
-                    edge_color=sv.Color.BLACK,
-                    radius=16,
-                    pitch=radar
-                )
-                radar = draw_points_on_pitch(
-                    config=pitch_config,
-                    xy=referee_xy,
-                    face_color=referee_color,
-                    edge_color=sv.Color.BLACK,
-                    radius=12,
-                    pitch=radar
-                )
+                # Draw players on radar (skip if ball_only mode)
+                if not ball_only:
+                    radar = draw_points_on_pitch(
+                        config=pitch_config,
+                        xy=team_1_xy,
+                        face_color=team_1_color,
+                        edge_color=sv.Color.BLACK,
+                        radius=16,
+                        pitch=radar
+                    )
+                    radar = draw_points_on_pitch(
+                        config=pitch_config,
+                        xy=team_2_xy,
+                        face_color=team_2_color,
+                        edge_color=sv.Color.BLACK,
+                        radius=16,
+                        pitch=radar
+                    )
+                    radar = draw_points_on_pitch(
+                        config=pitch_config,
+                        xy=referee_xy,
+                        face_color=referee_color,
+                        edge_color=sv.Color.BLACK,
+                        radius=12,
+                        pitch=radar
+                    )
+
+                # Always draw ball on radar
                 radar = draw_points_on_pitch(
                     config=pitch_config,
                     xy=ball_xy,

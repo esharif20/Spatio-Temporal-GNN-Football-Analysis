@@ -66,6 +66,9 @@ def main() -> None:
         # Radar mode options
         show_voronoi=args.voronoi,
         show_ball_path=not args.no_ball_path,
+        ball_only=args.ball_only,
+        show_keypoints=args.show_keypoints,
+        voronoi_overlay=args.voronoi_overlay,
     )
 
     # Write output video

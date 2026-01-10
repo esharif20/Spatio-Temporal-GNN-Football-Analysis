@@ -7,6 +7,7 @@ import numpy as np
 import supervision as sv
 
 from .config import SoccerPitchConfiguration
+from .view_transformer import ViewTransformer
 
 
 def draw_pitch(
@@ -395,3 +396,199 @@ def draw_ball_trajectory(
         cv2.line(pitch, pt1, pt2, line_color, thickness)
 
     return pitch
+
+
+def draw_pitch_keypoints_on_frame(
+    frame: np.ndarray,
+    frame_keypoints: np.ndarray,
+    pitch_config: SoccerPitchConfiguration,
+    detected_indices: np.ndarray,
+    vertex_color: sv.Color = sv.Color.from_hex('#FF1493'),
+    edge_color: sv.Color = sv.Color.from_hex('#00BFFF'),
+    vertex_radius: int = 8,
+    edge_thickness: int = 2,
+) -> np.ndarray:
+    """Draw pitch keypoints and edges on video frame.
+
+    Args:
+        frame: Video frame to annotate.
+        frame_keypoints: Detected keypoint positions in frame, shape (N, 2).
+        pitch_config: Pitch configuration with edges and labels.
+        detected_indices: Boolean mask or indices of which keypoints were detected.
+        vertex_color: Color for keypoint vertices.
+        edge_color: Color for edge lines connecting keypoints.
+        vertex_radius: Radius of keypoint circles.
+        edge_thickness: Thickness of edge lines.
+
+    Returns:
+        Annotated frame with keypoints and edges drawn.
+    """
+    annotated = frame.copy()
+
+    if len(frame_keypoints) == 0:
+        return annotated
+
+    # Build mapping from original index to detected keypoint index
+    # detected_indices is a boolean mask of shape (32,) indicating which keypoints passed confidence
+    detected_set = set(np.where(detected_indices)[0])
+    idx_to_pos = {}
+    pos_idx = 0
+    for orig_idx in range(len(detected_indices)):
+        if detected_indices[orig_idx]:
+            idx_to_pos[orig_idx] = pos_idx
+            pos_idx += 1
+
+    # Draw edges first (so vertices appear on top)
+    for start_idx, end_idx in pitch_config.edges:
+        # Edges use 1-based indexing
+        start_orig = start_idx - 1
+        end_orig = end_idx - 1
+        if start_orig in detected_set and end_orig in detected_set:
+            pt1 = tuple(frame_keypoints[idx_to_pos[start_orig]].astype(int))
+            pt2 = tuple(frame_keypoints[idx_to_pos[end_orig]].astype(int))
+            cv2.line(annotated, pt1, pt2, edge_color.as_bgr(), edge_thickness)
+
+    # Draw vertices
+    for i, (x, y) in enumerate(frame_keypoints):
+        cv2.circle(annotated, (int(x), int(y)), vertex_radius, vertex_color.as_bgr(), -1)
+
+    return annotated
+
+
+def draw_voronoi_on_frame(
+    frame: np.ndarray,
+    frame_keypoints: np.ndarray,
+    pitch_keypoints: np.ndarray,
+    team_1_pitch_xy: np.ndarray,
+    team_2_pitch_xy: np.ndarray,
+    pitch_config: SoccerPitchConfiguration,
+    team_1_color: sv.Color = sv.Color.from_hex('#00BFFF'),
+    team_2_color: sv.Color = sv.Color.from_hex('#FF1493'),
+    opacity: float = 0.3,
+) -> np.ndarray:
+    """Project Voronoi diagram from pitch space onto video frame.
+
+    Uses inverse homography to warp pitch-space Voronoi into frame coordinates.
+
+    Args:
+        frame: Video frame to annotate.
+        frame_keypoints: Detected keypoint positions in frame, shape (N, 2).
+        pitch_keypoints: Corresponding pitch coordinates, shape (N, 2).
+        team_1_pitch_xy: Team 1 positions in pitch coordinates, shape (N, 2).
+        team_2_pitch_xy: Team 2 positions in pitch coordinates, shape (N, 2).
+        pitch_config: Pitch configuration.
+        team_1_color: Color for team 1 control area.
+        team_2_color: Color for team 2 control area.
+        opacity: Overlay opacity (0-1).
+
+    Returns:
+        Frame with Voronoi overlay projected onto pitch area.
+    """
+    if len(frame_keypoints) < 4:
+        return frame
+
+    if team_1_pitch_xy.size == 0 or team_2_pitch_xy.size == 0:
+        return frame
+
+    h, w = frame.shape[:2]
+
+    # Create inverse transformer (pitch -> frame)
+    try:
+        inverse_transformer = ViewTransformer(
+            source=pitch_keypoints.astype(np.float32),
+            target=frame_keypoints.astype(np.float32)
+        )
+    except ValueError:
+        return frame
+
+    # Generate Voronoi on pitch space
+    scale = 0.1
+    padding = 50
+    voronoi_pitch = _generate_voronoi_image(
+        pitch_config=pitch_config,
+        team_1_xy=team_1_pitch_xy,
+        team_2_xy=team_2_pitch_xy,
+        team_1_color=team_1_color,
+        team_2_color=team_2_color,
+        padding=padding,
+        scale=scale,
+    )
+
+    # Warp Voronoi image to frame using inverse homography
+    warped = inverse_transformer.transform_image(
+        voronoi_pitch,
+        resolution_wh=(w, h)
+    )
+
+    # Create mask where warped image is valid (non-black)
+    mask = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY) > 10
+
+    # Blend onto frame
+    result = frame.copy()
+    for c in range(3):
+        result[:, :, c] = np.where(
+            mask,
+            (frame[:, :, c] * (1 - opacity) + warped[:, :, c] * opacity).astype(np.uint8),
+            frame[:, :, c]
+        )
+
+    return result
+
+
+def _generate_voronoi_image(
+    pitch_config: SoccerPitchConfiguration,
+    team_1_xy: np.ndarray,
+    team_2_xy: np.ndarray,
+    team_1_color: sv.Color,
+    team_2_color: sv.Color,
+    padding: int = 50,
+    scale: float = 0.1,
+) -> np.ndarray:
+    """Generate pure Voronoi image (colored regions only, no pitch lines).
+
+    Used as source for perspective warping onto frame.
+
+    Args:
+        pitch_config: Pitch configuration.
+        team_1_xy: Team 1 positions in pitch coordinates, shape (N, 2).
+        team_2_xy: Team 2 positions in pitch coordinates, shape (N, 2).
+        team_1_color: Color for team 1 control area.
+        team_2_color: Color for team 2 control area.
+        padding: Padding around pitch in pixels.
+        scale: Scale factor.
+
+    Returns:
+        BGR image of Voronoi regions.
+    """
+    scaled_width = int(pitch_config.width * scale)
+    scaled_length = int(pitch_config.length * scale)
+
+    # Create coordinate grids
+    y_coords, x_coords = np.indices((
+        scaled_width + 2 * padding,
+        scaled_length + 2 * padding
+    ))
+    y_coords = y_coords - padding
+    x_coords = x_coords - padding
+
+    # Calculate distances to nearest player in each team
+    def calc_min_distances(xy: np.ndarray) -> np.ndarray:
+        distances = np.sqrt(
+            (xy[:, 0, None, None] * scale - x_coords) ** 2 +
+            (xy[:, 1, None, None] * scale - y_coords) ** 2
+        )
+        return np.min(distances, axis=0)
+
+    min_dist_1 = calc_min_distances(team_1_xy)
+    min_dist_2 = calc_min_distances(team_2_xy)
+
+    # Create Voronoi image
+    voronoi = np.zeros((scaled_width + 2 * padding, scaled_length + 2 * padding, 3), dtype=np.uint8)
+    team_1_bgr = np.array(team_1_color.as_bgr(), dtype=np.uint8)
+    team_2_bgr = np.array(team_2_color.as_bgr(), dtype=np.uint8)
+
+    control_mask = min_dist_1 < min_dist_2
+    voronoi[control_mask] = team_1_bgr
+    voronoi[~control_mask] = team_2_bgr
+
+    return voronoi

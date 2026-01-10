@@ -9,6 +9,8 @@ from .annotators import (
     draw_pitch_voronoi_diagram,
     draw_ball_trajectory,
     render_radar_overlay,
+    draw_pitch_keypoints_on_frame,
+    draw_voronoi_on_frame,
 )
 
 __all__ = [
@@ -20,4 +22,6 @@ __all__ = [
     "draw_pitch_voronoi_diagram",
     "draw_ball_trajectory",
     "render_radar_overlay",
+    "draw_pitch_keypoints_on_frame",
+    "draw_voronoi_on_frame",
 ]

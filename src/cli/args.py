@@ -102,6 +102,12 @@ def parse_args() -> argparse.Namespace:
                         help="Show Voronoi team control regions (radar mode)")
     parser.add_argument("--no-ball-path", action="store_true",
                         help="Hide ball trajectory on radar")
+    parser.add_argument("--ball-only", action="store_true",
+                        help="Show only ball trajectory on radar, hide players/referees")
+    parser.add_argument("--show-keypoints", action="store_true",
+                        help="Project detected pitch keypoints and edges onto video frame")
+    parser.add_argument("--voronoi-overlay", action="store_true",
+                        help="Project Voronoi diagram onto video frame")
 
     # Caching (hyphen primary, underscore for backward compat)
     parser.add_argument("--no-stub", "--no_stub",
