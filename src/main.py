@@ -69,6 +69,8 @@ def main() -> None:
         ball_only=args.ball_only,
         show_keypoints=args.show_keypoints,
         voronoi_overlay=args.voronoi_overlay,
+        no_radar=args.no_radar,
+        show_analytics=args.analytics,
     )
 
     # Write output video

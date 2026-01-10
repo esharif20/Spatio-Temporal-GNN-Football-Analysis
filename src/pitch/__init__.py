@@ -2,6 +2,7 @@
 
 from .config import SoccerPitchConfiguration
 from .view_transformer import ViewTransformer
+from .homography_smoother import HomographySmoother
 from .annotators import (
     draw_pitch,
     draw_points_on_pitch,
@@ -16,6 +17,7 @@ from .annotators import (
 __all__ = [
     "SoccerPitchConfiguration",
     "ViewTransformer",
+    "HomographySmoother",
     "draw_pitch",
     "draw_points_on_pitch",
     "draw_paths_on_pitch",

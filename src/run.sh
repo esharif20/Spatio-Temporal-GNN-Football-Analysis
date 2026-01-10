@@ -28,6 +28,11 @@ BALL_MAX_JUMP=""
 DET_BATCH=""
 VORONOI=0
 NO_BALL_PATH=0
+BALL_ONLY=0
+SHOW_KEYPOINTS=0
+VORONOI_OVERLAY=0
+NO_RADAR=0
+ANALYTICS=0
 
 lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
@@ -204,6 +209,26 @@ while [[ $# -gt 0 ]]; do
       NO_BALL_PATH=1
       shift
       ;;
+    --ball-only)
+      BALL_ONLY=1
+      shift
+      ;;
+    --show-keypoints)
+      SHOW_KEYPOINTS=1
+      shift
+      ;;
+    --voronoi-overlay)
+      VORONOI_OVERLAY=1
+      shift
+      ;;
+    --no-radar)
+      NO_RADAR=1
+      shift
+      ;;
+    --analytics)
+      ANALYTICS=1
+      shift
+      ;;
     *)
       if [[ -z "$MODE_INPUT" ]]; then
         MODE_INPUT="$1"
@@ -340,6 +365,21 @@ if [[ "$VORONOI" -eq 1 ]]; then
 fi
 if [[ "$NO_BALL_PATH" -eq 1 ]]; then
   cmd+=(--no-ball-path)
+fi
+if [[ "$BALL_ONLY" -eq 1 ]]; then
+  cmd+=(--ball-only)
+fi
+if [[ "$SHOW_KEYPOINTS" -eq 1 ]]; then
+  cmd+=(--show-keypoints)
+fi
+if [[ "$VORONOI_OVERLAY" -eq 1 ]]; then
+  cmd+=(--voronoi-overlay)
+fi
+if [[ "$NO_RADAR" -eq 1 ]]; then
+  cmd+=(--no-radar)
+fi
+if [[ "$ANALYTICS" -eq 1 ]]; then
+  cmd+=(--analytics)
 fi
 
 "${cmd[@]}"

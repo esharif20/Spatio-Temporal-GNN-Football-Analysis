@@ -20,6 +20,7 @@ from config import (
 from pitch import (
     SoccerPitchConfiguration,
     ViewTransformer,
+    HomographySmoother,
     draw_pitch,
     draw_points_on_pitch,
     draw_pitch_voronoi_diagram,
@@ -44,10 +45,6 @@ GOALKEEPER_ID = 1
 PLAYER_ID = 2
 REFEREE_ID = 3
 
-# Homography smoothing window
-HOMOGRAPHY_WINDOW = 10
-HOMOGRAPHY_DECAY = 0.85  # Exponential decay for weighted average
-
 # Keypoint confidence threshold
 KEYPOINT_CONF_THRESHOLD = 0.5
 
@@ -65,7 +62,7 @@ def run(
     ball_only: bool = False,
     show_keypoints: bool = False,
     voronoi_overlay: bool = False,
-    show_analytics: bool = True,
+    show_analytics: bool = False,
     radar_opacity: float = 0.6,
     radar_scale: float = 0.4,
     radar_position: str = "bottom_center",
@@ -161,8 +158,13 @@ def run(
     ball_color = sv.Color.WHITE
     ball_path_color = sv.Color.from_hex('#FF6600')  # Orange
 
-    # Homography smoothing buffer
-    homography_buffer: deque = deque(maxlen=HOMOGRAPHY_WINDOW)
+    # Homography and position smoother
+    smoother = HomographySmoother(
+        window_size=15,
+        decay=0.8,
+        min_inliers=6,
+        position_alpha=0.4,
+    )
 
     # Analytics - initialize engine and ball path tracker
     analytics_engine = AnalyticsEngine(fps=DEFAULT_VIDEO_FPS, pitch_config=pitch_config)
@@ -218,17 +220,13 @@ def run(
                     target=pitch_keypoints.astype(np.float32)
                 )
 
-                # Smooth homography using exponentially weighted moving average
-                homography_buffer.append(transformer.matrix)
-                if len(homography_buffer) > 1:
-                    matrices = np.array(list(homography_buffer))
-                    n = len(matrices)
-                    # Exponentially weighted: recent frames get higher weight
-                    weights = np.power(HOMOGRAPHY_DECAY, np.arange(n - 1, -1, -1))
-                    weights = weights / weights.sum()
-                    transformer.matrix = np.sum(
-                        matrices * weights[:, np.newaxis, np.newaxis], axis=0
-                    )
+                # Get smoothed homography (quality gating + temporal smoothing)
+                smoothed_matrix = smoother.update_homography(transformer, frame_idx)
+                if smoothed_matrix is None:
+                    # No valid homography available yet
+                    yield annotated_frame
+                    continue
+                transformer.matrix = smoothed_matrix
 
                 # Extract player positions from tracks
                 team_1_positions = []
@@ -236,54 +234,72 @@ def run(
                 referee_positions = []
                 ball_positions = []
 
+                # Track active IDs for stale track cleanup
+                active_track_ids = set()
+
                 # Process players
                 for track_id, track_data in players_frame.items():
                     bbox = track_data.get("bbox")
                     team_id = track_data.get("team_id")
                     if bbox is not None:
+                        active_track_ids.add(track_id)
                         # Get bottom center of bbox
                         x1, y1, x2, y2 = bbox
                         foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                        pitch_pos = transformer.transform_points(foot_pos)
+                        pitch_pos = transformer.transform_points(foot_pos)[0]
+                        # Apply position smoothing
+                        pitch_pos = smoother.smooth_position(track_id, pitch_pos)
                         if team_id == 1:
-                            team_1_positions.append(pitch_pos[0])
+                            team_1_positions.append(pitch_pos)
                         else:
-                            team_2_positions.append(pitch_pos[0])
+                            team_2_positions.append(pitch_pos)
 
                 # Process goalkeepers (add to respective teams)
                 for track_id, track_data in goalkeepers_frame.items():
                     bbox = track_data.get("bbox")
                     team_id = track_data.get("team_id")
                     if bbox is not None:
+                        gk_id = track_id + 100000  # Offset to avoid collision with player IDs
+                        active_track_ids.add(gk_id)
                         x1, y1, x2, y2 = bbox
                         foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                        pitch_pos = transformer.transform_points(foot_pos)
+                        pitch_pos = transformer.transform_points(foot_pos)[0]
+                        pitch_pos = smoother.smooth_position(gk_id, pitch_pos)
                         if team_id == 1:
-                            team_1_positions.append(pitch_pos[0])
+                            team_1_positions.append(pitch_pos)
                         else:
-                            team_2_positions.append(pitch_pos[0])
+                            team_2_positions.append(pitch_pos)
 
                 # Process referees
                 for track_id, track_data in referees_frame.items():
                     bbox = track_data.get("bbox")
                     if bbox is not None:
+                        ref_id = track_id + 200000  # Offset to avoid collision
+                        active_track_ids.add(ref_id)
                         x1, y1, x2, y2 = bbox
                         foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                        pitch_pos = transformer.transform_points(foot_pos)
-                        referee_positions.append(pitch_pos[0])
+                        pitch_pos = transformer.transform_points(foot_pos)[0]
+                        pitch_pos = smoother.smooth_position(ref_id, pitch_pos)
+                        referee_positions.append(pitch_pos)
 
                 # Process ball
                 for track_id, track_data in ball_frame.items():
                     bbox = track_data.get("bbox")
                     if bbox is not None:
+                        ball_id = track_id + 300000  # Offset to avoid collision
+                        active_track_ids.add(ball_id)
                         x1, y1, x2, y2 = bbox
                         # Use bottom center as ground projection (like players)
                         ball_center = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                        pitch_pos = transformer.transform_points(ball_center)
-                        ball_positions.append(pitch_pos[0])
+                        pitch_pos = transformer.transform_points(ball_center)[0]
+                        pitch_pos = smoother.smooth_position(ball_id, pitch_pos)
+                        ball_positions.append(pitch_pos)
                         # Accumulate for ball path
                         if show_ball_path:
-                            accumulated_ball_positions.append(pitch_pos[0])
+                            accumulated_ball_positions.append(pitch_pos)
+
+                # Clean up stale tracks
+                smoother.clear_stale_tracks(active_track_ids)
 
                 # Convert to numpy arrays
                 team_1_xy = np.array(team_1_positions) if team_1_positions else np.empty((0, 2))

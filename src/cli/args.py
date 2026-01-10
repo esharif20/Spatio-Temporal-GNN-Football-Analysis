@@ -108,6 +108,10 @@ def parse_args() -> argparse.Namespace:
                         help="Project detected pitch keypoints and edges onto video frame")
     parser.add_argument("--voronoi-overlay", action="store_true",
                         help="Project Voronoi diagram onto video frame")
+    parser.add_argument("--no-radar", action="store_true",
+                        help="Hide radar overlay in ALL mode (voronoi-overlay still works)")
+    parser.add_argument("--analytics", action="store_true",
+                        help="Enable analytics summary output (off by default)")
 
     # Caching (hyphen primary, underscore for backward compat)
     parser.add_argument("--no-stub", "--no_stub",
