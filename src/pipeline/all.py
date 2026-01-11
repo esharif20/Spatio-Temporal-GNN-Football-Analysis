@@ -6,9 +6,11 @@ from typing import Iterator, TYPE_CHECKING
 import numpy as np
 import supervision as sv
 from ultralytics import YOLO
+from tqdm import tqdm
 
 from config import (
     BALL_DETECTION_MODEL_PATH,
+    IMG_SIZE,
     PITCH_DETECTION_MODEL_PATH,
     CONF_THRESHOLD,
     TEAM_STRIDE,
@@ -41,6 +43,81 @@ if TYPE_CHECKING:
 
 # Keypoint confidence threshold
 KEYPOINT_CONF_THRESHOLD = 0.5
+PITCH_MODEL_CONF_THRESHOLD = 0.3
+PITCH_BATCH_SIZE_CAP = 16
+
+
+def _pitch_batch_size(pitch_model: YOLO, det_batch_size: int) -> int:
+    if det_batch_size > 0:
+        return max(1, min(det_batch_size, PITCH_BATCH_SIZE_CAP))
+
+    device_type = str(getattr(pitch_model.device, "type", pitch_model.device))
+    if device_type.startswith("cuda"):
+        return PITCH_BATCH_SIZE_CAP
+    if device_type == "mps":
+        return 1
+    return min(8, PITCH_BATCH_SIZE_CAP)
+
+
+def _precompute_pitch_keypoints(
+    frames: list[np.ndarray],
+    pitch_model: YOLO,
+    pitch_config: SoccerPitchConfiguration,
+    det_batch_size: int,
+) -> list[dict]:
+    pitch_vertices = np.array(pitch_config.vertices, dtype=np.float32)
+    num_vertices = len(pitch_vertices)
+    batch_size = _pitch_batch_size(pitch_model, det_batch_size)
+    pitch_data = []
+
+    for start in tqdm(
+        range(0, len(frames), batch_size),
+        desc="Pitch keypoints",
+        unit="frame",
+    ):
+        batch = frames[start:start + batch_size]
+        results = pitch_model.predict(
+            batch,
+            conf=PITCH_MODEL_CONF_THRESHOLD,
+            imgsz=IMG_SIZE,
+            verbose=False,
+        )
+        for result in results:
+            keypoints = sv.KeyPoints.from_ultralytics(result)
+            conf_mask = np.zeros(num_vertices, dtype=bool)
+            frame_keypoints = np.empty((0, 2), dtype=np.float32)
+            pitch_keypoints = np.empty((0, 2), dtype=np.float32)
+
+            if keypoints.confidence is not None and len(keypoints.confidence) > 0:
+                conf = keypoints.confidence[0]
+                if conf.shape[0] == num_vertices:
+                    conf_mask = conf > KEYPOINT_CONF_THRESHOLD
+
+            if conf_mask.any() and keypoints.xy is not None and len(keypoints.xy) > 0:
+                xy = keypoints.xy[0]
+                if xy.shape[0] == num_vertices:
+                    frame_keypoints = xy[conf_mask].astype(np.float32)
+                    pitch_keypoints = pitch_vertices[conf_mask]
+
+            full_frame_points = None
+            if frame_keypoints.shape[0] >= 4:
+                try:
+                    transformer = ViewTransformer(
+                        source=pitch_keypoints.astype(np.float32),
+                        target=frame_keypoints.astype(np.float32)
+                    )
+                    full_frame_points = transformer.transform_points(pitch_vertices)
+                except ValueError:
+                    pass
+
+            pitch_data.append({
+                "frame_keypoints": frame_keypoints,
+                "pitch_keypoints": pitch_keypoints,
+                "conf_mask": conf_mask,
+                "full_frame_points": full_frame_points,
+            })
+
+    return pitch_data
 
 
 def run(
@@ -160,6 +237,19 @@ def run(
             position_alpha=0.4,
         )
 
+    needs_pitch_detection = (
+        pitch_model is not None and (show_keypoints or voronoi_overlay or not no_radar)
+    )
+    pitch_data = None
+    if needs_pitch_detection:
+        print("Precomputing pitch keypoints...")
+        pitch_data = _precompute_pitch_keypoints(
+            frames=frames,
+            pitch_model=pitch_model,
+            pitch_config=pitch_config,
+            det_batch_size=det_batch_size,
+        )
+
     # Analytics engine (only initialized if analytics enabled)
     analytics_engine = None
     if show_analytics:
@@ -167,237 +257,251 @@ def run(
 
     output_frames = tracker.draw_annotations(frames, tracks)
     for frame_idx, frame in enumerate(output_frames):
-        # Add pitch keypoints/voronoi/radar overlay if model available
-        needs_pitch_detection = show_keypoints or voronoi_overlay or (not no_radar)
-        if pitch_model is not None and needs_pitch_detection:
-            result = pitch_model(frame, verbose=False)[0]
-            keypoints = sv.KeyPoints.from_ultralytics(result)
+        if pitch_data is None:
+            yield frame
+            continue
 
-            # Filter low confidence keypoints
-            if keypoints.confidence is not None and len(keypoints.confidence) > 0:
-                conf_mask = keypoints.confidence[0] > KEYPOINT_CONF_THRESHOLD
-                frame_keypoints = keypoints.xy[0][conf_mask]
-                pitch_keypoints = np.array(pitch_config.vertices)[conf_mask]
-            else:
-                conf_mask = np.array([])
-                frame_keypoints = np.array([])
-                pitch_keypoints = np.array([])
+        pitch_frame = pitch_data[frame_idx]
+        frame_keypoints = pitch_frame["frame_keypoints"]
+        pitch_keypoints = pitch_frame["pitch_keypoints"]
+        conf_mask = pitch_frame["conf_mask"]
+        full_frame_points = pitch_frame["full_frame_points"]
 
-            # Debug: log keypoint detection stats every 30 frames
-            if frame_idx % 30 == 0:
-                detected_indices = np.where(conf_mask)[0] if hasattr(conf_mask, '__len__') and len(conf_mask) > 0 else []
-                print(f"[Frame {frame_idx}] Keypoints: {len(frame_keypoints)}/32 detected (indices: {list(detected_indices)[:10]}{'...' if len(detected_indices) > 10 else ''})")
+        # Debug: log keypoint detection stats every 30 frames
+        if frame_idx % 30 == 0:
+            detected_indices = np.where(conf_mask)[0]
+            print(
+                f"[Frame {frame_idx}] Keypoints: {len(frame_keypoints)}/32 detected "
+                f"(indices: {list(detected_indices)[:10]}{'...' if len(detected_indices) > 10 else ''})"
+            )
 
-            # Draw keypoints on frame if requested
-            if show_keypoints and len(frame_keypoints) > 0:
+        # Draw projected full pitch edges + detected reference points
+        if show_keypoints:
+            if full_frame_points is not None:
+                all_indices = np.ones(len(pitch_config.vertices), dtype=bool)
+                frame = draw_pitch_keypoints_on_frame(
+                    frame=frame,
+                    frame_keypoints=full_frame_points,
+                    pitch_config=pitch_config,
+                    detected_indices=all_indices,
+                    vertex_color=sv.Color.from_hex("#00BFFF"),
+                    edge_color=sv.Color.from_hex("#00BFFF"),
+                    vertex_radius=6,
+                    edge_thickness=2,
+                )
+            if frame_keypoints.size > 0:
                 frame = draw_pitch_keypoints_on_frame(
                     frame=frame,
                     frame_keypoints=frame_keypoints,
                     pitch_config=pitch_config,
                     detected_indices=conf_mask,
+                    vertex_color=sv.Color.from_hex("#FF1493"),
+                    edge_color=sv.Color.from_hex("#FF1493"),
+                    vertex_radius=8,
+                    edge_thickness=1,
                 )
 
-            # Draw voronoi overlay if requested
-            if voronoi_overlay and len(frame_keypoints) >= 4:
-                try:
-                    transformer = ViewTransformer(
-                        source=frame_keypoints.astype(np.float32),
-                        target=pitch_keypoints.astype(np.float32)
-                    )
+        # Draw voronoi overlay if requested
+        if voronoi_overlay and len(frame_keypoints) >= 4:
+            try:
+                transformer = ViewTransformer(
+                    source=frame_keypoints.astype(np.float32),
+                    target=pitch_keypoints.astype(np.float32)
+                )
 
-                    # Get player positions for this frame
-                    players_frame = tracks["players"][frame_idx]
-                    goalkeepers_frame = tracks["goalkeepers"][frame_idx]
+                # Get player positions for this frame
+                players_frame = tracks["players"][frame_idx]
+                goalkeepers_frame = tracks["goalkeepers"][frame_idx]
 
-                    team_1_positions = []
-                    team_2_positions = []
+                team_1_positions = []
+                team_2_positions = []
 
-                    # Process players
-                    for track_id, track_data in players_frame.items():
-                        bbox = track_data.get("bbox")
-                        team_id = track_data.get("team_id")
-                        if bbox is not None:
-                            x1, y1, x2, y2 = bbox
-                            foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                            pitch_pos = transformer.transform_points(foot_pos)
-                            if team_id == 0:
-                                team_1_positions.append(pitch_pos[0])
-                            elif team_id == 1:
-                                team_2_positions.append(pitch_pos[0])
-                            # Skip players without team assignment
+                # Process players
+                for track_id, track_data in players_frame.items():
+                    bbox = track_data.get("bbox")
+                    team_id = track_data.get("team_id")
+                    if bbox is not None:
+                        x1, y1, x2, y2 = bbox
+                        foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
+                        pitch_pos = transformer.transform_points(foot_pos)
+                        if team_id == 0:
+                            team_1_positions.append(pitch_pos[0])
+                        elif team_id == 1:
+                            team_2_positions.append(pitch_pos[0])
+                        # Skip players without team assignment
 
-                    # Process goalkeepers
-                    for track_id, track_data in goalkeepers_frame.items():
-                        bbox = track_data.get("bbox")
-                        team_id = track_data.get("team_id")
-                        if bbox is not None:
-                            x1, y1, x2, y2 = bbox
-                            foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                            pitch_pos = transformer.transform_points(foot_pos)
-                            if team_id == 0:
-                                team_1_positions.append(pitch_pos[0])
-                            elif team_id == 1:
-                                team_2_positions.append(pitch_pos[0])
+                # Process goalkeepers
+                for track_id, track_data in goalkeepers_frame.items():
+                    bbox = track_data.get("bbox")
+                    team_id = track_data.get("team_id")
+                    if bbox is not None:
+                        x1, y1, x2, y2 = bbox
+                        foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
+                        pitch_pos = transformer.transform_points(foot_pos)
+                        if team_id == 0:
+                            team_1_positions.append(pitch_pos[0])
+                        elif team_id == 1:
+                            team_2_positions.append(pitch_pos[0])
 
-                    team_1_xy = np.array(team_1_positions) if team_1_positions else np.empty((0, 2))
-                    team_2_xy = np.array(team_2_positions) if team_2_positions else np.empty((0, 2))
+                team_1_xy = np.array(team_1_positions) if team_1_positions else np.empty((0, 2))
+                team_2_xy = np.array(team_2_positions) if team_2_positions else np.empty((0, 2))
 
-                    if team_1_xy.size > 0 and team_2_xy.size > 0:
-                        frame = draw_voronoi_on_frame(
-                            frame=frame,
-                            frame_keypoints=frame_keypoints,
-                            pitch_keypoints=pitch_keypoints,
-                            team_1_pitch_xy=team_1_xy,
-                            team_2_pitch_xy=team_2_xy,
-                            pitch_config=pitch_config,
-                            team_1_color=team_1_color,
-                            team_2_color=team_2_color,
-                            opacity=0.3,
-                        )
-                except ValueError:
-                    pass  # Homography failed
-
-            # Draw radar overlay if not disabled
-            if not no_radar and smoother is not None and len(frame_keypoints) >= 4:
-                try:
-                    transformer = ViewTransformer(
-                        source=frame_keypoints.astype(np.float32),
-                        target=pitch_keypoints.astype(np.float32)
-                    )
-
-                    # Get smoothed homography (quality gating + temporal smoothing)
-                    smoothed_matrix = smoother.update_homography(transformer, frame_idx)
-                    if smoothed_matrix is None:
-                        # No valid homography available yet, skip radar this frame
-                        yield frame
-                        continue
-                    transformer.matrix = smoothed_matrix
-
-                    # Get player/referee/ball positions for this frame
-                    players_frame = tracks["players"][frame_idx]
-                    goalkeepers_frame = tracks["goalkeepers"][frame_idx]
-                    referees_frame = tracks["referees"][frame_idx]
-                    ball_frame = tracks["ball"][frame_idx]
-
-                    team_1_positions = []
-                    team_2_positions = []
-                    referee_positions = []
-                    ball_positions = []
-
-                    # Track active IDs for stale track cleanup
-                    active_track_ids = set()
-
-                    # Process players
-                    for track_id, track_data in players_frame.items():
-                        bbox = track_data.get("bbox")
-                        team_id = track_data.get("team_id")
-                        if bbox is not None:
-                            active_track_ids.add(track_id)
-                            x1, y1, x2, y2 = bbox
-                            foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                            pitch_pos = transformer.transform_points(foot_pos)[0]
-                            pitch_pos = smoother.smooth_position(track_id, pitch_pos)
-                            if team_id == 0:
-                                team_1_positions.append(pitch_pos)
-                            elif team_id == 1:
-                                team_2_positions.append(pitch_pos)
-
-                    # Process goalkeepers
-                    for track_id, track_data in goalkeepers_frame.items():
-                        bbox = track_data.get("bbox")
-                        team_id = track_data.get("team_id")
-                        if bbox is not None:
-                            gk_id = track_id + 100000
-                            active_track_ids.add(gk_id)
-                            x1, y1, x2, y2 = bbox
-                            foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                            pitch_pos = transformer.transform_points(foot_pos)[0]
-                            pitch_pos = smoother.smooth_position(gk_id, pitch_pos)
-                            if team_id == 0:
-                                team_1_positions.append(pitch_pos)
-                            elif team_id == 1:
-                                team_2_positions.append(pitch_pos)
-
-                    # Process referees
-                    for track_id, track_data in referees_frame.items():
-                        bbox = track_data.get("bbox")
-                        if bbox is not None:
-                            ref_id = track_id + 200000
-                            active_track_ids.add(ref_id)
-                            x1, y1, x2, y2 = bbox
-                            foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                            pitch_pos = transformer.transform_points(foot_pos)[0]
-                            pitch_pos = smoother.smooth_position(ref_id, pitch_pos)
-                            referee_positions.append(pitch_pos)
-
-                    # Process ball
-                    for track_id, track_data in ball_frame.items():
-                        bbox = track_data.get("bbox")
-                        if bbox is not None:
-                            ball_id = track_id + 300000
-                            active_track_ids.add(ball_id)
-                            x1, y1, x2, y2 = bbox
-                            ball_center = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
-                            pitch_pos = transformer.transform_points(ball_center)[0]
-                            pitch_pos = smoother.smooth_position(ball_id, pitch_pos)
-                            ball_positions.append(pitch_pos)
-
-                    # Clean up stale tracks
-                    smoother.clear_stale_tracks(active_track_ids)
-
-                    # Convert to numpy arrays
-                    team_1_xy = np.array(team_1_positions) if team_1_positions else np.empty((0, 2))
-                    team_2_xy = np.array(team_2_positions) if team_2_positions else np.empty((0, 2))
-                    referee_xy = np.array(referee_positions) if referee_positions else np.empty((0, 2))
-                    ball_xy = np.array(ball_positions) if ball_positions else np.empty((0, 2))
-
-                    # Draw radar
-                    radar = draw_pitch(pitch_config)
-
-                    # Draw players on radar
-                    radar = draw_points_on_pitch(
-                        config=pitch_config,
-                        xy=team_1_xy,
-                        face_color=team_1_color,
-                        edge_color=sv.Color.BLACK,
-                        radius=16,
-                        pitch=radar
-                    )
-                    radar = draw_points_on_pitch(
-                        config=pitch_config,
-                        xy=team_2_xy,
-                        face_color=team_2_color,
-                        edge_color=sv.Color.BLACK,
-                        radius=16,
-                        pitch=radar
-                    )
-                    radar = draw_points_on_pitch(
-                        config=pitch_config,
-                        xy=referee_xy,
-                        face_color=referee_color,
-                        edge_color=sv.Color.BLACK,
-                        radius=12,
-                        pitch=radar
-                    )
-                    radar = draw_points_on_pitch(
-                        config=pitch_config,
-                        xy=ball_xy,
-                        face_color=ball_color,
-                        edge_color=sv.Color.BLACK,
-                        radius=10,
-                        pitch=radar
-                    )
-
-                    # Overlay radar on frame
-                    frame = render_radar_overlay(
+                if team_1_xy.size > 0 and team_2_xy.size > 0:
+                    frame = draw_voronoi_on_frame(
                         frame=frame,
-                        radar=radar,
-                        position="bottom_center",
-                        opacity=0.6,
-                        scale=0.4,
+                        frame_keypoints=frame_keypoints,
+                        pitch_keypoints=pitch_keypoints,
+                        team_1_pitch_xy=team_1_xy,
+                        team_2_pitch_xy=team_2_xy,
+                        pitch_config=pitch_config,
+                        team_1_color=team_1_color,
+                        team_2_color=team_2_color,
+                        opacity=0.3,
                     )
-                except ValueError:
-                    pass  # Homography failed
+            except ValueError:
+                pass  # Homography failed
+
+        # Draw radar overlay if not disabled
+        if not no_radar and smoother is not None and len(frame_keypoints) >= 4:
+            try:
+                transformer = ViewTransformer(
+                    source=frame_keypoints.astype(np.float32),
+                    target=pitch_keypoints.astype(np.float32)
+                )
+
+                # Get smoothed homography (quality gating + temporal smoothing)
+                smoothed_matrix = smoother.update_homography(transformer, frame_idx)
+                if smoothed_matrix is None:
+                    # No valid homography available yet, skip radar this frame
+                    yield frame
+                    continue
+                transformer.matrix = smoothed_matrix
+
+                # Get player/referee/ball positions for this frame
+                players_frame = tracks["players"][frame_idx]
+                goalkeepers_frame = tracks["goalkeepers"][frame_idx]
+                referees_frame = tracks["referees"][frame_idx]
+                ball_frame = tracks["ball"][frame_idx]
+
+                team_1_positions = []
+                team_2_positions = []
+                referee_positions = []
+                ball_positions = []
+
+                # Track active IDs for stale track cleanup
+                active_track_ids = set()
+
+                # Process players
+                for track_id, track_data in players_frame.items():
+                    bbox = track_data.get("bbox")
+                    team_id = track_data.get("team_id")
+                    if bbox is not None:
+                        active_track_ids.add(track_id)
+                        x1, y1, x2, y2 = bbox
+                        foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
+                        pitch_pos = transformer.transform_points(foot_pos)[0]
+                        pitch_pos = smoother.smooth_position(track_id, pitch_pos)
+                        if team_id == 0:
+                            team_1_positions.append(pitch_pos)
+                        elif team_id == 1:
+                            team_2_positions.append(pitch_pos)
+
+                # Process goalkeepers
+                for track_id, track_data in goalkeepers_frame.items():
+                    bbox = track_data.get("bbox")
+                    team_id = track_data.get("team_id")
+                    if bbox is not None:
+                        gk_id = track_id + 100000
+                        active_track_ids.add(gk_id)
+                        x1, y1, x2, y2 = bbox
+                        foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
+                        pitch_pos = transformer.transform_points(foot_pos)[0]
+                        pitch_pos = smoother.smooth_position(gk_id, pitch_pos)
+                        if team_id == 0:
+                            team_1_positions.append(pitch_pos)
+                        elif team_id == 1:
+                            team_2_positions.append(pitch_pos)
+
+                # Process referees
+                for track_id, track_data in referees_frame.items():
+                    bbox = track_data.get("bbox")
+                    if bbox is not None:
+                        ref_id = track_id + 200000
+                        active_track_ids.add(ref_id)
+                        x1, y1, x2, y2 = bbox
+                        foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
+                        pitch_pos = transformer.transform_points(foot_pos)[0]
+                        pitch_pos = smoother.smooth_position(ref_id, pitch_pos)
+                        referee_positions.append(pitch_pos)
+
+                # Process ball
+                for track_id, track_data in ball_frame.items():
+                    bbox = track_data.get("bbox")
+                    if bbox is not None:
+                        ball_id = track_id + 300000
+                        active_track_ids.add(ball_id)
+                        x1, y1, x2, y2 = bbox
+                        ball_center = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
+                        pitch_pos = transformer.transform_points(ball_center)[0]
+                        pitch_pos = smoother.smooth_position(ball_id, pitch_pos)
+                        ball_positions.append(pitch_pos)
+
+                # Clean up stale tracks
+                smoother.clear_stale_tracks(active_track_ids)
+
+                # Convert to numpy arrays
+                team_1_xy = np.array(team_1_positions) if team_1_positions else np.empty((0, 2))
+                team_2_xy = np.array(team_2_positions) if team_2_positions else np.empty((0, 2))
+                referee_xy = np.array(referee_positions) if referee_positions else np.empty((0, 2))
+                ball_xy = np.array(ball_positions) if ball_positions else np.empty((0, 2))
+
+                # Draw radar
+                radar = draw_pitch(pitch_config)
+
+                # Draw players on radar
+                radar = draw_points_on_pitch(
+                    config=pitch_config,
+                    xy=team_1_xy,
+                    face_color=team_1_color,
+                    edge_color=sv.Color.BLACK,
+                    radius=16,
+                    pitch=radar
+                )
+                radar = draw_points_on_pitch(
+                    config=pitch_config,
+                    xy=team_2_xy,
+                    face_color=team_2_color,
+                    edge_color=sv.Color.BLACK,
+                    radius=16,
+                    pitch=radar
+                )
+                radar = draw_points_on_pitch(
+                    config=pitch_config,
+                    xy=referee_xy,
+                    face_color=referee_color,
+                    edge_color=sv.Color.BLACK,
+                    radius=12,
+                    pitch=radar
+                )
+                radar = draw_points_on_pitch(
+                    config=pitch_config,
+                    xy=ball_xy,
+                    face_color=ball_color,
+                    edge_color=sv.Color.BLACK,
+                    radius=10,
+                    pitch=radar
+                )
+
+                # Overlay radar on frame
+                frame = render_radar_overlay(
+                    frame=frame,
+                    radar=radar,
+                    position="bottom_center",
+                    opacity=0.6,
+                    scale=0.4,
+                )
+            except ValueError:
+                pass  # Homography failed
 
         yield frame
 
