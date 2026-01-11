@@ -37,6 +37,8 @@ def get_frame_generator(
     voronoi_overlay: bool = False,
     no_radar: bool = False,
     show_analytics: bool = False,
+    # Pitch debug mode
+    debug_pitch: bool = False,
 ) -> Iterator[np.ndarray]:
     """Get appropriate frame generator for pipeline mode.
 
@@ -65,7 +67,7 @@ def get_frame_generator(
     if mode == Mode.PITCH_DETECTION:
         if not PITCH_DETECTION_MODEL_PATH.exists():
             raise FileNotFoundError(f"Pitch model not found: {PITCH_DETECTION_MODEL_PATH}")
-        return run_pitch(source_video_path=source_video_path, device=device)
+        return run_pitch(source_video_path=source_video_path, device=device, debug=debug_pitch)
 
     if mode == Mode.PLAYER_DETECTION:
         return run_players(

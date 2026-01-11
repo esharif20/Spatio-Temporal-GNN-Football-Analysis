@@ -12,11 +12,11 @@ from .view_transformer import ViewTransformer
 
 def draw_pitch(
     config: SoccerPitchConfiguration,
-    background_color: sv.Color = sv.Color(34, 139, 34),  # Forest green
-    line_color: sv.Color = sv.Color.WHITE,
+    background_color: sv.Color = sv.Color(45, 55, 45),  # Dark slate green
+    line_color: sv.Color = sv.Color(200, 210, 200),  # Soft off-white
     padding: int = 50,
-    line_thickness: int = 4,
-    point_radius: int = 8,
+    line_thickness: int = 3,
+    point_radius: int = 6,
     scale: float = 0.1
 ) -> np.ndarray:
     """Draw a 2D soccer pitch diagram.
@@ -290,10 +290,15 @@ def render_radar_overlay(
     frame: np.ndarray,
     radar: np.ndarray,
     position: str = "bottom_center",
-    opacity: float = 0.6,
-    scale: float = 0.4
+    opacity: float = 0.85,
+    scale: float = 0.25,
+    corner_radius: int = 12,
+    border_thickness: int = 2,
+    border_color: tuple = (80, 90, 80),
+    shadow_offset: int = 4,
+    shadow_blur: int = 8,
 ) -> np.ndarray:
-    """Overlay radar/mini-map on video frame.
+    """Overlay radar/mini-map on video frame with modern styling.
 
     Args:
         frame: Video frame to overlay on.
@@ -301,11 +306,17 @@ def render_radar_overlay(
         position: Position on frame - "bottom_center", "bottom_right", etc.
         opacity: Radar opacity (0-1).
         scale: Scale of radar relative to frame width.
+        corner_radius: Radius for rounded corners in pixels.
+        border_thickness: Border line thickness in pixels.
+        border_color: Border color in BGR format.
+        shadow_offset: Shadow offset in pixels.
+        shadow_blur: Shadow blur kernel size.
 
     Returns:
-        Frame with radar overlay.
+        Frame with styled radar overlay.
     """
     h, w = frame.shape[:2]
+    result = frame.copy()
 
     # Scale radar to fit
     target_width = int(w * scale)
@@ -313,26 +324,91 @@ def render_radar_overlay(
     target_height = int(target_width / aspect)
     radar_scaled = cv2.resize(radar, (target_width, target_height))
 
+    # Margin from edges
+    margin = 16
+
     # Calculate position
     if position == "bottom_center":
         x = (w - target_width) // 2
-        y = h - target_height - 10
+        y = h - target_height - margin
     elif position == "bottom_right":
-        x = w - target_width - 10
-        y = h - target_height - 10
+        x = w - target_width - margin
+        y = h - target_height - margin
     elif position == "bottom_left":
-        x = 10
-        y = h - target_height - 10
+        x = margin
+        y = h - target_height - margin
     elif position == "top_center":
         x = (w - target_width) // 2
-        y = 10
+        y = margin
     else:
         x = (w - target_width) // 2
-        y = h - target_height - 10
+        y = h - target_height - margin
 
-    # Create overlay using supervision's draw_image
-    rect = sv.Rect(x=x, y=y, width=target_width, height=target_height)
-    result = sv.draw_image(frame.copy(), radar_scaled, opacity=opacity, rect=rect)
+    # Create rounded rectangle mask
+    mask = np.zeros((target_height, target_width), dtype=np.uint8)
+    cv2.rectangle(
+        mask,
+        (corner_radius, 0),
+        (target_width - corner_radius, target_height),
+        255, -1
+    )
+    cv2.rectangle(
+        mask,
+        (0, corner_radius),
+        (target_width, target_height - corner_radius),
+        255, -1
+    )
+    # Draw corner circles
+    cv2.circle(mask, (corner_radius, corner_radius), corner_radius, 255, -1)
+    cv2.circle(mask, (target_width - corner_radius, corner_radius), corner_radius, 255, -1)
+    cv2.circle(mask, (corner_radius, target_height - corner_radius), corner_radius, 255, -1)
+    cv2.circle(mask, (target_width - corner_radius, target_height - corner_radius), corner_radius, 255, -1)
+
+    # Draw shadow (darker region offset behind radar)
+    shadow_x = x + shadow_offset
+    shadow_y = y + shadow_offset
+    if shadow_x + target_width <= w and shadow_y + target_height <= h:
+        shadow_mask = np.zeros((h, w), dtype=np.uint8)
+        shadow_mask[shadow_y:shadow_y + target_height, shadow_x:shadow_x + target_width] = mask
+        # Blur shadow for soft edge
+        if shadow_blur > 0:
+            shadow_mask = cv2.GaussianBlur(shadow_mask, (shadow_blur * 2 + 1, shadow_blur * 2 + 1), 0)
+        # Apply shadow (darken underlying pixels)
+        shadow_alpha = 0.3
+        for c in range(3):
+            result[:, :, c] = np.where(
+                shadow_mask > 0,
+                (result[:, :, c] * (1 - shadow_alpha * shadow_mask / 255)).astype(np.uint8),
+                result[:, :, c]
+            )
+
+    # Apply rounded mask to radar
+    radar_masked = radar_scaled.copy()
+    for c in range(3):
+        radar_masked[:, :, c] = cv2.bitwise_and(radar_masked[:, :, c], mask)
+
+    # Blend radar onto frame
+    roi = result[y:y + target_height, x:x + target_width]
+    mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) / 255.0
+    blended = (radar_masked * opacity + roi * (1 - opacity * mask_3ch)).astype(np.uint8)
+    # Apply mask to only blend within rounded region
+    for c in range(3):
+        roi[:, :, c] = np.where(mask > 0, blended[:, :, c], roi[:, :, c])
+    result[y:y + target_height, x:x + target_width] = roi
+
+    # Draw border (rounded rectangle outline)
+    if border_thickness > 0:
+        # Top and bottom edges
+        cv2.line(result, (x + corner_radius, y), (x + target_width - corner_radius, y), border_color, border_thickness)
+        cv2.line(result, (x + corner_radius, y + target_height - 1), (x + target_width - corner_radius, y + target_height - 1), border_color, border_thickness)
+        # Left and right edges
+        cv2.line(result, (x, y + corner_radius), (x, y + target_height - corner_radius), border_color, border_thickness)
+        cv2.line(result, (x + target_width - 1, y + corner_radius), (x + target_width - 1, y + target_height - corner_radius), border_color, border_thickness)
+        # Corner arcs
+        cv2.ellipse(result, (x + corner_radius, y + corner_radius), (corner_radius, corner_radius), 180, 0, 90, border_color, border_thickness)
+        cv2.ellipse(result, (x + target_width - corner_radius - 1, y + corner_radius), (corner_radius, corner_radius), 270, 0, 90, border_color, border_thickness)
+        cv2.ellipse(result, (x + corner_radius, y + target_height - corner_radius - 1), (corner_radius, corner_radius), 90, 0, 90, border_color, border_thickness)
+        cv2.ellipse(result, (x + target_width - corner_radius - 1, y + target_height - corner_radius - 1), (corner_radius, corner_radius), 0, 0, 90, border_color, border_thickness)
 
     return result
 

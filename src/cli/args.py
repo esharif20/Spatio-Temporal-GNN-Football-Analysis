@@ -113,6 +113,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analytics", action="store_true",
                         help="Enable analytics summary output (off by default)")
 
+    # Pitch debug mode
+    parser.add_argument("--debug-pitch", action="store_true",
+                        help="Debug mode: show keypoint indices for diagnosing ordering issues")
+
     # Caching (hyphen primary, underscore for backward compat)
     parser.add_argument("--no-stub", "--no_stub",
                         dest="no_stub",

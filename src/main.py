@@ -71,6 +71,8 @@ def main() -> None:
         voronoi_overlay=args.voronoi_overlay,
         no_radar=args.no_radar,
         show_analytics=args.analytics,
+        # Pitch debug mode
+        debug_pitch=args.debug_pitch,
     )
 
     # Write output video

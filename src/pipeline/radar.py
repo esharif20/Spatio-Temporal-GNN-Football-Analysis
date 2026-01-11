@@ -45,8 +45,28 @@ GOALKEEPER_ID = 1
 PLAYER_ID = 2
 REFEREE_ID = 3
 
-# Keypoint confidence threshold
-KEYPOINT_CONF_THRESHOLD = 0.5
+# Keypoint confidence threshold - lowered for better coverage
+KEYPOINT_CONF_THRESHOLD = 0.35
+
+
+def validate_keypoint_distribution(keypoints: np.ndarray, min_spread: float = 200.0) -> bool:
+    """Check if keypoints are well-distributed (not collinear).
+
+    Collinear keypoints produce unstable homographies. This validates
+    that keypoints have sufficient spread in both X and Y dimensions.
+
+    Args:
+        keypoints: Array of keypoint positions, shape (N, 2).
+        min_spread: Minimum required spread in each dimension (pixels).
+
+    Returns:
+        True if keypoints are well-distributed, False otherwise.
+    """
+    if len(keypoints) < 4:
+        return False
+    x_spread = np.max(keypoints[:, 0]) - np.min(keypoints[:, 0])
+    y_spread = np.max(keypoints[:, 1]) - np.min(keypoints[:, 1])
+    return x_spread > min_spread and y_spread > min_spread
 
 
 def run(
@@ -63,8 +83,8 @@ def run(
     show_keypoints: bool = False,
     voronoi_overlay: bool = False,
     show_analytics: bool = False,
-    radar_opacity: float = 0.6,
-    radar_scale: float = 0.4,
+    radar_opacity: float = 0.85,
+    radar_scale: float = 0.25,
     radar_position: str = "bottom_center",
 ) -> Iterator[np.ndarray]:
     """Run radar pipeline - detection, tracking, team classification with pitch overlay.
@@ -158,12 +178,13 @@ def run(
     ball_color = sv.Color.WHITE
     ball_path_color = sv.Color.from_hex('#FF6600')  # Orange
 
-    # Homography and position smoother
+    # Homography and position smoother - tuned for responsiveness
     smoother = HomographySmoother(
-        window_size=15,
-        decay=0.8,
-        min_inliers=6,
-        position_alpha=0.4,
+        window_size=5,       # 5 frames ≈ 167ms at 30fps (was 15)
+        decay=0.9,           # Faster response to camera movement (was 0.8)
+        min_inliers=4,       # Minimum for valid homography (was 6)
+        position_alpha=0.7,  # 70% new position for responsiveness (was 0.4)
+        max_fallback_age=30, # Max 1 second of stale matrix fallback
     )
 
     # Analytics - initialize engine and ball path tracker
@@ -212,8 +233,8 @@ def run(
                 detected_indices=conf_mask,
             )
 
-        # Check if we have enough keypoints for homography
-        if len(frame_keypoints) >= 4:
+        # Check if we have enough well-distributed keypoints for homography
+        if len(frame_keypoints) >= 4 and validate_keypoint_distribution(frame_keypoints):
             try:
                 transformer = ViewTransformer(
                     source=frame_keypoints.astype(np.float32),
@@ -247,8 +268,12 @@ def run(
                         x1, y1, x2, y2 = bbox
                         foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                         pitch_pos = transformer.transform_points(foot_pos)[0]
-                        # Apply position smoothing
-                        pitch_pos = smoother.smooth_position(track_id, pitch_pos)
+                        # Apply position smoothing with boundary clamping
+                        pitch_pos = smoother.smooth_position(
+                            track_id, pitch_pos,
+                            pitch_length=pitch_config.length,
+                            pitch_width=pitch_config.width
+                        )
                         if team_id == 1:
                             team_1_positions.append(pitch_pos)
                         else:
@@ -264,7 +289,11 @@ def run(
                         x1, y1, x2, y2 = bbox
                         foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                         pitch_pos = transformer.transform_points(foot_pos)[0]
-                        pitch_pos = smoother.smooth_position(gk_id, pitch_pos)
+                        pitch_pos = smoother.smooth_position(
+                            gk_id, pitch_pos,
+                            pitch_length=pitch_config.length,
+                            pitch_width=pitch_config.width
+                        )
                         if team_id == 1:
                             team_1_positions.append(pitch_pos)
                         else:
@@ -279,7 +308,11 @@ def run(
                         x1, y1, x2, y2 = bbox
                         foot_pos = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                         pitch_pos = transformer.transform_points(foot_pos)[0]
-                        pitch_pos = smoother.smooth_position(ref_id, pitch_pos)
+                        pitch_pos = smoother.smooth_position(
+                            ref_id, pitch_pos,
+                            pitch_length=pitch_config.length,
+                            pitch_width=pitch_config.width
+                        )
                         referee_positions.append(pitch_pos)
 
                 # Process ball
@@ -292,7 +325,11 @@ def run(
                         # Use bottom center as ground projection (like players)
                         ball_center = np.array([[(x1 + x2) / 2, y2]], dtype=np.float32)
                         pitch_pos = transformer.transform_points(ball_center)[0]
-                        pitch_pos = smoother.smooth_position(ball_id, pitch_pos)
+                        pitch_pos = smoother.smooth_position(
+                            ball_id, pitch_pos,
+                            pitch_length=pitch_config.length,
+                            pitch_width=pitch_config.width
+                        )
                         ball_positions.append(pitch_pos)
                         # Accumulate for ball path
                         if show_ball_path:

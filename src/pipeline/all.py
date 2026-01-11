@@ -41,8 +41,8 @@ from .base import load_frames, build_tracker, get_stub_path
 if TYPE_CHECKING:
     from trackers.ball_config import BallConfig
 
-# Keypoint confidence threshold
-KEYPOINT_CONF_THRESHOLD = 0.5
+# Keypoint confidence threshold - lowered for better coverage
+KEYPOINT_CONF_THRESHOLD = 0.35
 PITCH_MODEL_CONF_THRESHOLD = 0.3
 PITCH_BATCH_SIZE_CAP = 16
 
