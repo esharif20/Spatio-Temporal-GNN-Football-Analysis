@@ -1,12 +1,22 @@
 """Pitch keypoint detection using Roboflow API or local YOLO model."""
 
 import os
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import supervision as sv
 
 from config import PITCH_DETECTION_MODEL_PATH
+
+# Auto-load .env file if present
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    pass  # python-dotenv not installed, rely on manual env setup
 
 # Roboflow model ID (same as notebook)
 ROBOFLOW_FIELD_MODEL_ID = "football-field-detection-f07vi/14"
