@@ -20,10 +20,12 @@ PITCH_MODEL_CONF_THRESHOLD = 0.3
 MIN_KEYPOINTS_FOR_HOMOGRAPHY = 4
 # Minimum spread in pixels for keypoint distribution validation
 MIN_KEYPOINT_SPREAD = 200.0
-# Smoothing buffer size (frames)
-HOMOGRAPHY_SMOOTH_WINDOW = 7
-# Exponential decay for weighted averaging
-HOMOGRAPHY_DECAY = 0.85
+# Smoothing buffer size (frames) - larger = more stable but slower to adapt
+HOMOGRAPHY_SMOOTH_WINDOW = 15
+# Exponential decay for weighted averaging - lower = smoother but more lag
+HOMOGRAPHY_DECAY = 0.7
+# Maximum allowed change in homography matrix (Frobenius norm) to reject outliers
+MAX_HOMOGRAPHY_CHANGE = 0.5
 
 
 def draw_debug_keypoints(
@@ -124,6 +126,7 @@ class PitchHomographySmoother:
         window_size: int = HOMOGRAPHY_SMOOTH_WINDOW,
         decay: float = HOMOGRAPHY_DECAY,
         min_inliers: int = 4,
+        max_change: float = MAX_HOMOGRAPHY_CHANGE,
     ) -> None:
         """Initialize the smoother.
 
@@ -131,13 +134,26 @@ class PitchHomographySmoother:
             window_size: Number of frames to buffer for smoothing.
             decay: Exponential decay factor (higher = more responsive).
             min_inliers: Minimum RANSAC inliers to accept a homography.
+            max_change: Maximum allowed normalized change to reject outliers.
         """
         self.window_size = window_size
         self.decay = decay
         self.min_inliers = min_inliers
+        self.max_change = max_change
         self._buffer: deque = deque(maxlen=window_size)
         self._last_valid_matrix: Optional[npt.NDArray[np.float64]] = None
         self._last_inlier_count: int = 0
+
+    def _is_outlier(self, matrix: npt.NDArray[np.float64]) -> bool:
+        """Check if new matrix is too different from current smoothed estimate."""
+        if self._last_valid_matrix is None:
+            return False
+        # Normalize matrices for comparison (divide by bottom-right element)
+        norm_new = matrix / (matrix[2, 2] + 1e-8)
+        norm_old = self._last_valid_matrix / (self._last_valid_matrix[2, 2] + 1e-8)
+        # Frobenius norm of difference
+        diff = np.linalg.norm(norm_new - norm_old)
+        return diff > self.max_change
 
     def update(
         self,
@@ -159,6 +175,12 @@ class PitchHomographySmoother:
             if self._last_valid_matrix is not None:
                 return self._last_valid_matrix
             return None
+
+        # Outlier rejection - reject matrices that change too much
+        if self._is_outlier(matrix):
+            if self._last_valid_matrix is not None:
+                return self._last_valid_matrix
+            # If no valid matrix yet, accept anyway
 
         # Add to buffer
         self._buffer.append(matrix.copy())
@@ -343,12 +365,19 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
 
         num_detected = len(frame_keypoints)
 
-        if frame_idx % 30 == 0:
-            print(f"[Frame {frame_idx}] Keypoints: {num_detected}/32 detected")
-
         # Compute homography if enough well-distributed keypoints
         smoothed_matrix = None
-        if num_detected >= MIN_KEYPOINTS_FOR_HOMOGRAPHY and validate_keypoint_distribution(frame_keypoints):
+        distribution_valid = validate_keypoint_distribution(frame_keypoints) if num_detected >= 4 else False
+
+        if frame_idx % 30 == 0:
+            if num_detected >= 4:
+                x_spread = np.max(frame_keypoints[:, 0]) - np.min(frame_keypoints[:, 0])
+                y_spread = np.max(frame_keypoints[:, 1]) - np.min(frame_keypoints[:, 1])
+                print(f"[Frame {frame_idx}] Keypoints: {num_detected}/32 | Spread: x={x_spread:.0f}, y={y_spread:.0f} | Valid: {distribution_valid}")
+            else:
+                print(f"[Frame {frame_idx}] Keypoints: {num_detected}/32 (need >=4)")
+
+        if num_detected >= MIN_KEYPOINTS_FOR_HOMOGRAPHY and distribution_valid:
             try:
                 transformer = ViewTransformer(
                     source=pitch_keypoints.astype(np.float32),
@@ -359,13 +388,19 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
                     matrix=transformer.matrix,
                     inlier_count=transformer.inlier_count,
                 )
-            except ValueError:
+                if frame_idx % 30 == 0 and smoothed_matrix is not None:
+                    print(f"  -> Homography OK, inliers: {transformer.inlier_count}")
+            except ValueError as e:
+                if frame_idx % 30 == 0:
+                    print(f"  -> Homography failed: {e}")
                 # Fallback to last valid matrix
                 if smoother.has_valid_matrix:
                     smoothed_matrix = smoother._last_valid_matrix
         elif smoother.has_valid_matrix:
             # Not enough keypoints but we have a cached matrix
             smoothed_matrix = smoother._last_valid_matrix
+            if frame_idx % 30 == 0:
+                print(f"  -> Using cached homography")
 
         # Draw pitch outline using smoothed homography
         if smoothed_matrix is not None:
