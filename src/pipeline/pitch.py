@@ -16,16 +16,20 @@ from .base import load_frames
 KEYPOINT_CONF_THRESHOLD = 0.5
 # Inference threshold for the pitch model
 PITCH_MODEL_CONF_THRESHOLD = 0.3
-# Minimum keypoints required for homography
-MIN_KEYPOINTS_FOR_HOMOGRAPHY = 4
+# Minimum keypoints required for homography (increased from 4 to 6 for stability)
+MIN_KEYPOINTS_FOR_HOMOGRAPHY = 6
+# Minimum RANSAC inliers required to accept homography
+MIN_RANSAC_INLIERS = 6
 # Minimum spread in pixels for keypoint distribution validation
 MIN_KEYPOINT_SPREAD = 200.0
 # Smoothing buffer size (frames) - larger = more stable but slower to adapt
-HOMOGRAPHY_SMOOTH_WINDOW = 15
+HOMOGRAPHY_SMOOTH_WINDOW = 25
 # Exponential decay for weighted averaging - lower = smoother but more lag
-HOMOGRAPHY_DECAY = 0.7
+HOMOGRAPHY_DECAY = 0.5
 # Maximum allowed change in homography matrix (Frobenius norm) to reject outliers
-MAX_HOMOGRAPHY_CHANGE = 0.5
+MAX_HOMOGRAPHY_CHANGE = 0.3
+# Maximum reprojection error in pixels to accept homography
+MAX_REPROJECTION_ERROR = 15.0
 
 
 def draw_debug_keypoints(
@@ -114,6 +118,66 @@ def validate_keypoint_distribution(keypoints: np.ndarray, min_spread: float = MI
     return x_spread > min_spread and y_spread > min_spread
 
 
+def validate_quadrant_distribution(
+    keypoints: np.ndarray,
+    frame_shape: tuple,
+    min_quadrants: int = 2,
+) -> bool:
+    """Check if keypoints are distributed across multiple frame quadrants.
+
+    Well-distributed keypoints across quadrants produce more stable homographies.
+
+    Args:
+        keypoints: Array of keypoint positions, shape (N, 2).
+        frame_shape: Frame dimensions as (height, width).
+        min_quadrants: Minimum number of quadrants that must have keypoints.
+
+    Returns:
+        True if keypoints span at least min_quadrants, False otherwise.
+    """
+    if len(keypoints) < 4:
+        return False
+
+    h, w = frame_shape[:2]
+    mid_x, mid_y = w / 2, h / 2
+
+    # Count keypoints in each quadrant
+    quadrants = set()
+    for x, y in keypoints:
+        q = (0 if x < mid_x else 1) + (0 if y < mid_y else 2)
+        quadrants.add(q)
+
+    return len(quadrants) >= min_quadrants
+
+
+def compute_reprojection_error(
+    source_points: np.ndarray,
+    target_points: np.ndarray,
+    homography: np.ndarray,
+) -> float:
+    """Compute mean reprojection error for homography validation.
+
+    Args:
+        source_points: Source points (pitch coordinates), shape (N, 2).
+        target_points: Target points (frame coordinates), shape (N, 2).
+        homography: 3x3 homography matrix.
+
+    Returns:
+        Mean reprojection error in pixels.
+    """
+    if len(source_points) == 0:
+        return float('inf')
+
+    # Project source points using homography
+    src_reshaped = source_points.reshape(-1, 1, 2).astype(np.float32)
+    projected = cv2.perspectiveTransform(src_reshaped, homography)
+    projected = projected.reshape(-1, 2)
+
+    # Compute Euclidean distances
+    errors = np.linalg.norm(projected - target_points, axis=1)
+    return float(np.mean(errors))
+
+
 class PitchHomographySmoother:
     """Smooth homography matrices for stable pitch projection.
 
@@ -125,7 +189,7 @@ class PitchHomographySmoother:
         self,
         window_size: int = HOMOGRAPHY_SMOOTH_WINDOW,
         decay: float = HOMOGRAPHY_DECAY,
-        min_inliers: int = 4,
+        min_inliers: int = MIN_RANSAC_INLIERS,
         max_change: float = MAX_HOMOGRAPHY_CHANGE,
     ) -> None:
         """Initialize the smoother.
@@ -364,18 +428,21 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
             pitch_keypoints = np.array([])
 
         num_detected = len(frame_keypoints)
+        frame_h, frame_w = frame.shape[:2]
 
         # Compute homography if enough well-distributed keypoints
         smoothed_matrix = None
-        distribution_valid = validate_keypoint_distribution(frame_keypoints) if num_detected >= 4 else False
+        spread_valid = validate_keypoint_distribution(frame_keypoints) if num_detected >= 4 else False
+        quadrant_valid = validate_quadrant_distribution(frame_keypoints, frame.shape) if num_detected >= 4 else False
+        distribution_valid = spread_valid and quadrant_valid
 
         if frame_idx % 30 == 0:
             if num_detected >= 4:
                 x_spread = np.max(frame_keypoints[:, 0]) - np.min(frame_keypoints[:, 0])
                 y_spread = np.max(frame_keypoints[:, 1]) - np.min(frame_keypoints[:, 1])
-                print(f"[Frame {frame_idx}] Keypoints: {num_detected}/32 | Spread: x={x_spread:.0f}, y={y_spread:.0f} | Valid: {distribution_valid}")
+                print(f"[Frame {frame_idx}] Keypoints: {num_detected}/32 | Spread: x={x_spread:.0f}, y={y_spread:.0f} | Quadrants: {quadrant_valid}")
             else:
-                print(f"[Frame {frame_idx}] Keypoints: {num_detected}/32 (need >=4)")
+                print(f"[Frame {frame_idx}] Keypoints: {num_detected}/32 (need >={MIN_KEYPOINTS_FOR_HOMOGRAPHY})")
 
         if num_detected >= MIN_KEYPOINTS_FOR_HOMOGRAPHY and distribution_valid:
             try:
@@ -383,13 +450,32 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
                     source=pitch_keypoints.astype(np.float32),
                     target=frame_keypoints.astype(np.float32)
                 )
-                # Feed to smoother and get smoothed result
-                smoothed_matrix = smoother.update(
-                    matrix=transformer.matrix,
-                    inlier_count=transformer.inlier_count,
+
+                # Check reprojection error before accepting
+                reproj_error = compute_reprojection_error(
+                    pitch_keypoints.astype(np.float32),
+                    frame_keypoints.astype(np.float32),
+                    transformer.matrix,
                 )
-                if frame_idx % 30 == 0 and smoothed_matrix is not None:
-                    print(f"  -> Homography OK, inliers: {transformer.inlier_count}")
+
+                if reproj_error > MAX_REPROJECTION_ERROR:
+                    if frame_idx % 30 == 0:
+                        print(f"  -> Rejected: reproj error {reproj_error:.1f}px > {MAX_REPROJECTION_ERROR}px")
+                    if smoother.has_valid_matrix:
+                        smoothed_matrix = smoother._last_valid_matrix
+                elif transformer.inlier_count < MIN_RANSAC_INLIERS:
+                    if frame_idx % 30 == 0:
+                        print(f"  -> Rejected: inliers {transformer.inlier_count} < {MIN_RANSAC_INLIERS}")
+                    if smoother.has_valid_matrix:
+                        smoothed_matrix = smoother._last_valid_matrix
+                else:
+                    # Feed to smoother and get smoothed result
+                    smoothed_matrix = smoother.update(
+                        matrix=transformer.matrix,
+                        inlier_count=transformer.inlier_count,
+                    )
+                    if frame_idx % 30 == 0 and smoothed_matrix is not None:
+                        print(f"  -> Homography OK, inliers: {transformer.inlier_count}, reproj: {reproj_error:.1f}px")
             except ValueError as e:
                 if frame_idx % 30 == 0:
                     print(f"  -> Homography failed: {e}")
