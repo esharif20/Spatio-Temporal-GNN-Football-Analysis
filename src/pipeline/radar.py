@@ -45,8 +45,8 @@ GOALKEEPER_ID = 1
 PLAYER_ID = 2
 REFEREE_ID = 3
 
-# Keypoint confidence threshold - lowered for better coverage
-KEYPOINT_CONF_THRESHOLD = 0.35
+# Keypoint confidence threshold - matches notebook's 0.5 to filter noisy detections
+KEYPOINT_CONF_THRESHOLD = 0.5
 
 
 def validate_keypoint_distribution(keypoints: np.ndarray, min_spread: float = 200.0) -> bool:

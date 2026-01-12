@@ -13,12 +13,14 @@ from config import IMG_SIZE, PITCH_DETECTION_MODEL_PATH
 from pitch import SoccerPitchConfiguration, ViewTransformer, draw_pitch_keypoints_on_frame
 from .base import load_frames
 
-# Keypoint confidence threshold - lowered for better coverage
-KEYPOINT_CONF_THRESHOLD = 0.35
+# Keypoint confidence threshold - matches notebook's 0.5 to filter noisy detections
+KEYPOINT_CONF_THRESHOLD = 0.5
 # Inference threshold for the pitch model
 PITCH_MODEL_CONF_THRESHOLD = 0.3
 # Minimum keypoints required for homography
 MIN_KEYPOINTS_FOR_HOMOGRAPHY = 4
+# Minimum spread in pixels for keypoint distribution validation
+MIN_KEYPOINT_SPREAD = 200.0
 # Smoothing buffer size (frames)
 HOMOGRAPHY_SMOOTH_WINDOW = 7
 # Exponential decay for weighted averaging
@@ -89,6 +91,26 @@ def draw_debug_keypoints(
         cv2.putText(annotated, conf_label, (x + 15, y + 5), font, 0.4, color, 1)
 
     return annotated
+
+
+def validate_keypoint_distribution(keypoints: np.ndarray, min_spread: float = MIN_KEYPOINT_SPREAD) -> bool:
+    """Check if keypoints are well-distributed (not collinear).
+
+    Collinear keypoints produce unstable homographies. This validates
+    that keypoints have sufficient spread in both X and Y dimensions.
+
+    Args:
+        keypoints: Array of keypoint positions, shape (N, 2).
+        min_spread: Minimum required spread in each dimension (pixels).
+
+    Returns:
+        True if keypoints are well-distributed, False otherwise.
+    """
+    if len(keypoints) < 4:
+        return False
+    x_spread = np.max(keypoints[:, 0]) - np.min(keypoints[:, 0])
+    y_spread = np.max(keypoints[:, 1]) - np.min(keypoints[:, 1])
+    return x_spread > min_spread and y_spread > min_spread
 
 
 class PitchHomographySmoother:
@@ -332,9 +354,9 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
         if frame_idx % 30 == 0:
             print(f"[Frame {frame_idx}] Keypoints: {num_detected}/32 detected")
 
-        # Compute homography if enough keypoints
+        # Compute homography if enough well-distributed keypoints
         smoothed_matrix = None
-        if num_detected >= MIN_KEYPOINTS_FOR_HOMOGRAPHY:
+        if num_detected >= MIN_KEYPOINTS_FOR_HOMOGRAPHY and validate_keypoint_distribution(frame_keypoints):
             try:
                 transformer = ViewTransformer(
                     source=pitch_keypoints.astype(np.float32),
