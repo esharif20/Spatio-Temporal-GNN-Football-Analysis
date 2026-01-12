@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+# Get the directory where the script is located (src/)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Get repo root (parent of src/)
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
 MODE_INPUT=""
 VIDEO_INPUT=""
 OUT=""
@@ -33,6 +38,7 @@ SHOW_KEYPOINTS=0
 VORONOI_OVERLAY=0
 NO_RADAR=0
 ANALYTICS=0
+DEBUG_PITCH=0
 
 lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
@@ -48,6 +54,30 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --source-video-path|--source_video_path)
+      if [[ -z "${2:-}" ]]; then
+        echo "Missing value for --source-video-path" >&2
+        exit 1
+      fi
+      VIDEO_INPUT="$2"
+      shift 2
+      ;;
+    --target-video-path|--target_video_path|--out)
+      if [[ -z "${2:-}" ]]; then
+        echo "Missing value for --target-video-path" >&2
+        exit 1
+      fi
+      OUT="$2"
+      shift 2
+      ;;
+    --device)
+      if [[ -z "${2:-}" ]]; then
+        echo "Missing value for --device" >&2
+        exit 1
+      fi
+      DEVICE="$2"
+      shift 2
+      ;;
     --fresh)
       NO_STUB=1
       CLEAR_STUB=1
@@ -229,6 +259,10 @@ while [[ $# -gt 0 ]]; do
       ANALYTICS=1
       shift
       ;;
+    --debug-pitch)
+      DEBUG_PITCH=1
+      shift
+      ;;
     *)
       if [[ -z "$MODE_INPUT" ]]; then
         MODE_INPUT="$1"
@@ -269,25 +303,39 @@ esac
 if [[ -f "$VIDEO_INPUT" ]]; then
   video="$VIDEO_INPUT"
 else
-  candidate="src/input_videos/$VIDEO_INPUT"
+  # Try multiple locations for the video
+  candidate="$SCRIPT_DIR/input_videos/$VIDEO_INPUT"
   if [[ "$candidate" != *.mp4 ]]; then
     candidate="${candidate}.mp4"
   fi
   if [[ -f "$candidate" ]]; then
     video="$candidate"
   else
-    echo "Video not found: $VIDEO_INPUT" >&2
-    exit 1
+    # Also try repo root relative path (for backwards compatibility)
+    candidate="$REPO_ROOT/src/input_videos/$VIDEO_INPUT"
+    if [[ "$candidate" != *.mp4 ]]; then
+      candidate="${candidate}.mp4"
+    fi
+    if [[ -f "$candidate" ]]; then
+      video="$candidate"
+    else
+      echo "Video not found: $VIDEO_INPUT" >&2
+      echo "Searched in: $SCRIPT_DIR/input_videos/" >&2
+      exit 1
+    fi
   fi
 fi
 
 if [[ -z "$OUT" ]]; then
   base=$(basename "$video")
   base="${base%.*}"
-  OUT="src/output_videos/${base}/${base}_${mode}.mp4"
+  OUT="$SCRIPT_DIR/output_videos/${base}/${base}_${mode}.mp4"
 fi
 
-cmd=(python src/main.py
+# Ensure output directory exists
+mkdir -p "$(dirname "$OUT")"
+
+cmd=(python "$SCRIPT_DIR/main.py"
   --source-video-path "$video"
   --target-video-path "$OUT"
   --mode "$mode"
@@ -380,6 +428,9 @@ if [[ "$NO_RADAR" -eq 1 ]]; then
 fi
 if [[ "$ANALYTICS" -eq 1 ]]; then
   cmd+=(--analytics)
+fi
+if [[ "$DEBUG_PITCH" -eq 1 ]]; then
+  cmd+=(--debug-pitch)
 fi
 
 "${cmd[@]}"
