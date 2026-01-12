@@ -53,7 +53,16 @@ fi
 if [[ "${SKIP_ASSETS:-0}" != "1" ]]; then
   if [[ -f "$ROOT/src/setup.sh" ]]; then
     echo "Downloading models and sample videos..."
-    bash "$ROOT/src/setup.sh"
+    if ! bash "$ROOT/src/setup.sh"; then
+      echo "WARNING: setup.sh failed, trying direct downloads..." >&2
+      mkdir -p "$ROOT/src/models" "$ROOT/src/input_videos"
+      # Try downloading directly with gdown
+      gdown -O "$ROOT/src/models/ball_detection.pt" "https://drive.google.com/uc?id=1isw4wx-MK9h9LMr36VvIWlJD6ppUvw7V" || echo "Failed to download ball_detection.pt"
+      gdown -O "$ROOT/src/models/player_detection.pt" "https://drive.google.com/uc?id=17PXFNlx-jI7VjVo_vQnB1sONjRyvoB-q" || echo "Failed to download player_detection.pt"
+      gdown -O "$ROOT/src/models/pitch_detection.pt" "https://drive.google.com/uc?id=1Ma5Kt86tgpdjCTKfum79YMgNnSjcoOyf" || echo "Failed to download pitch_detection.pt"
+      gdown -O "$ROOT/src/input_videos/0bfacc_0.mp4" "https://drive.google.com/uc?id=12TqauVZ9tLAv8kWxTTBFWtgt2hNQ4_ZF" || echo "Failed to download 0bfacc_0.mp4"
+      gdown -O "$ROOT/src/input_videos/121364_0.mp4" "https://drive.google.com/uc?id=1vVwjW1dE1drIdd4ZSILfbCGPD4weoNiu" || echo "Failed to download 121364_0.mp4"
+    fi
   else
     echo "src/setup.sh not found; skipping sample assets" >&2
   fi
