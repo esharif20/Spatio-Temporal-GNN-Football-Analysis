@@ -1,13 +1,10 @@
 """All pipeline mode - runs all stages."""
 
-import os
 from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
 import numpy as np
 import supervision as sv
-from dotenv import load_dotenv
-from inference_sdk import InferenceHTTPClient
 from tqdm import tqdm
 
 from config import (
@@ -20,14 +17,8 @@ from config import (
     DEFAULT_VIDEO_FPS,
     OUTPUT_DIR,
 )
-
-# Load environment variables
-load_dotenv()
-
-# Roboflow model ID - same as notebook for correct keypoint ordering
-FIELD_DETECTION_MODEL_ID = "football-field-detection-f07vi/14"
-ROBOFLOW_API_URL = "https://detect.roboflow.com"
 from utils.drawing import draw_keypoints
+from utils.pitch_detector import PitchDetector
 from trackers.track_stabiliser import stabilise_tracks
 from team_assigner import TeamAssigner, TeamAssignerConfig
 from utils.metrics import compute_ball_metrics, print_ball_metrics
@@ -55,17 +46,16 @@ PITCH_MODEL_CONF_THRESHOLD = 0.3
 
 def _precompute_pitch_keypoints(
     frames: list[np.ndarray],
-    pitch_client: InferenceHTTPClient,
+    pitch_detector: PitchDetector,
     pitch_config: SoccerPitchConfiguration,
 ) -> list[dict]:
-    """Precompute pitch keypoints for all frames using Roboflow API."""
+    """Precompute pitch keypoints for all frames using local YOLO model."""
     pitch_vertices = np.array(pitch_config.vertices, dtype=np.float32)
     num_vertices = len(pitch_vertices)
     pitch_data = []
 
     for frame in tqdm(frames, desc="Pitch keypoints", unit="frame"):
-        result = pitch_client.infer(frame, model_id=FIELD_DETECTION_MODEL_ID)
-        keypoints = sv.KeyPoints.from_inference(result)
+        keypoints = pitch_detector.detect(frame)
 
         conf_mask = np.zeros(num_vertices, dtype=bool)
         frame_keypoints = np.empty((0, 2), dtype=np.float32)
@@ -134,14 +124,12 @@ def run(
     Yields:
         Annotated frames with full analysis
     """
-    # Load Roboflow pitch detection client (uses HTTP API)
-    pitch_client = None
-    api_key = os.environ.get("ROBOFLOW_API_KEY")
-    if api_key:
-        print("Loading pitch detection client...")
-        pitch_client = InferenceHTTPClient(api_url=ROBOFLOW_API_URL, api_key=api_key)
-    else:
-        print("Warning: ROBOFLOW_API_KEY not set, pitch detection disabled")
+    # Load local pitch detection model
+    pitch_detector = None
+    needs_pitch = show_keypoints or voronoi_overlay or not no_radar
+    if needs_pitch:
+        print("Loading pitch detection model...")
+        pitch_detector = PitchDetector(device=device, conf_threshold=PITCH_MODEL_CONF_THRESHOLD)
 
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)
@@ -223,15 +211,12 @@ def run(
             position_alpha=0.4,
         )
 
-    needs_pitch_detection = (
-        pitch_client is not None and (show_keypoints or voronoi_overlay or not no_radar)
-    )
     pitch_data = None
-    if needs_pitch_detection:
+    if pitch_detector is not None:
         print("Precomputing pitch keypoints...")
         pitch_data = _precompute_pitch_keypoints(
             frames=frames,
-            pitch_client=pitch_client,
+            pitch_detector=pitch_detector,
             pitch_config=pitch_config,
         )
 

@@ -1,6 +1,5 @@
 """Pitch detection pipeline mode."""
 
-import os
 from collections import deque
 from typing import Iterator, Optional
 
@@ -8,18 +7,10 @@ import cv2
 import numpy as np
 import numpy.typing as npt
 import supervision as sv
-from dotenv import load_dotenv
-from inference_sdk import InferenceHTTPClient
 
 from pitch import SoccerPitchConfiguration, ViewTransformer, draw_pitch_keypoints_on_frame
+from utils.pitch_detector import PitchDetector
 from .base import load_frames
-
-# Load environment variables
-load_dotenv()
-
-# Roboflow model ID - same as notebook for correct keypoint ordering
-FIELD_DETECTION_MODEL_ID = "football-field-detection-f07vi/14"
-ROBOFLOW_API_URL = "https://detect.roboflow.com"
 
 # Keypoint confidence threshold - matches notebook's 0.5 to filter noisy detections
 KEYPOINT_CONF_THRESHOLD = 0.5
@@ -287,14 +278,9 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
     Yields:
         Annotated frames with pitch keypoints and edges
     """
-    # Load Roboflow pitch detection client (uses HTTP API, no numpy>=2.0 requirement)
-    api_key = os.environ.get("ROBOFLOW_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "ROBOFLOW_API_KEY environment variable not set. "
-            "Get your key from https://app.roboflow.com/settings/api"
-        )
-    client = InferenceHTTPClient(api_url=ROBOFLOW_API_URL, api_key=api_key)
+    # Load local pitch detection model
+    print("Loading pitch detection model...")
+    pitch_detector = PitchDetector(device=device, conf_threshold=PITCH_MODEL_CONF_THRESHOLD)
     pitch_config = SoccerPitchConfiguration()
     frames = load_frames(source_video_path)
 
@@ -329,8 +315,7 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
         print("\nCompare detected indices with these locations!\n")
 
     for frame_idx, frame in enumerate(frames):
-        result = client.infer(frame, model_id=FIELD_DETECTION_MODEL_ID)
-        keypoints = sv.KeyPoints.from_inference(result)
+        keypoints = pitch_detector.detect(frame)
 
         # Debug mode: show all keypoints with their indices
         if debug:

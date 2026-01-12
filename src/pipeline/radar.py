@@ -1,13 +1,10 @@
 """Radar/tactical view pipeline mode - projects players onto 2D pitch."""
 
-import os
 from collections import deque
 from typing import Iterator, List, Optional, TYPE_CHECKING
 
 import numpy as np
 import supervision as sv
-from dotenv import load_dotenv
-from inference_sdk import InferenceHTTPClient
 
 from config import (
     CONF_THRESHOLD,
@@ -17,13 +14,7 @@ from config import (
     TEAM_MIN_CROP_SIZE,
     DEFAULT_VIDEO_FPS,
 )
-
-# Load environment variables
-load_dotenv()
-
-# Roboflow model ID - same as notebook for correct keypoint ordering
-FIELD_DETECTION_MODEL_ID = "football-field-detection-f07vi/14"
-ROBOFLOW_API_URL = "https://detect.roboflow.com"
+from utils.pitch_detector import PitchDetector
 from pitch import (
     SoccerPitchConfiguration,
     ViewTransformer,
@@ -54,6 +45,8 @@ REFEREE_ID = 3
 
 # Keypoint confidence threshold - matches notebook's 0.5 to filter noisy detections
 KEYPOINT_CONF_THRESHOLD = 0.5
+# Inference threshold for the pitch model
+PITCH_MODEL_CONF_THRESHOLD = 0.3
 
 
 def validate_keypoint_distribution(keypoints: np.ndarray, min_spread: float = 200.0) -> bool:
@@ -117,15 +110,9 @@ def run(
     Yields:
         Annotated frames with radar overlay
     """
-    # Load Roboflow pitch detection client (uses HTTP API)
-    api_key = os.environ.get("ROBOFLOW_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "ROBOFLOW_API_KEY environment variable not set. "
-            "Get your key from https://app.roboflow.com/settings/api"
-        )
-    print("Loading pitch detection client...")
-    pitch_client = InferenceHTTPClient(api_url=ROBOFLOW_API_URL, api_key=api_key)
+    # Load local pitch detection model
+    print("Loading pitch detection model...")
+    pitch_detector = PitchDetector(device=device, conf_threshold=PITCH_MODEL_CONF_THRESHOLD)
 
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)
@@ -211,8 +198,7 @@ def run(
         ball_frame = tracks["ball"][frame_idx]
 
         # Run pitch keypoint detection
-        result = pitch_client.infer(frame, model_id=FIELD_DETECTION_MODEL_ID)
-        keypoints = sv.KeyPoints.from_inference(result)
+        keypoints = pitch_detector.detect(frame)
 
         # Filter low confidence keypoints
         if keypoints.confidence is not None and len(keypoints.confidence) > 0:
