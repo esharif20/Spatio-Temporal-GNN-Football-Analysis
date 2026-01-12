@@ -52,7 +52,8 @@ fi
 
 if [[ "${SKIP_ASSETS:-0}" != "1" ]]; then
   if [[ -f "$ROOT/src/setup.sh" ]]; then
-    bash "$ROOT/src/setup.sh" || true
+    echo "Downloading models and sample videos..."
+    bash "$ROOT/src/setup.sh"
   else
     echo "src/setup.sh not found; skipping sample assets" >&2
   fi
