@@ -31,9 +31,6 @@ fi
 
 python -m pip install -r "$ROOT/requirements-colab.txt"
 
-# Install inference for Roboflow pitch detection model
-python -m pip install inference
-
 if [[ -f "$ROOT/src/run.sh" ]]; then
   chmod +x "$ROOT/src/run.sh"
 fi

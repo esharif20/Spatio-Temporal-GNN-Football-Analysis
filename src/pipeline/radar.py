@@ -7,7 +7,7 @@ from typing import Iterator, List, Optional, TYPE_CHECKING
 import numpy as np
 import supervision as sv
 from dotenv import load_dotenv
-from inference import get_model
+from inference_sdk import InferenceHTTPClient
 
 from config import (
     CONF_THRESHOLD,
@@ -23,6 +23,7 @@ load_dotenv()
 
 # Roboflow model ID - same as notebook for correct keypoint ordering
 FIELD_DETECTION_MODEL_ID = "football-field-detection-f07vi/14"
+ROBOFLOW_API_URL = "https://detect.roboflow.com"
 from pitch import (
     SoccerPitchConfiguration,
     ViewTransformer,
@@ -116,15 +117,15 @@ def run(
     Yields:
         Annotated frames with radar overlay
     """
-    # Load Roboflow pitch detection model
+    # Load Roboflow pitch detection client (uses HTTP API)
     api_key = os.environ.get("ROBOFLOW_API_KEY")
     if not api_key:
         raise ValueError(
             "ROBOFLOW_API_KEY environment variable not set. "
             "Get your key from https://app.roboflow.com/settings/api"
         )
-    print("Loading pitch detection model...")
-    pitch_model = get_model(model_id=FIELD_DETECTION_MODEL_ID, api_key=api_key)
+    print("Loading pitch detection client...")
+    pitch_client = InferenceHTTPClient(api_url=ROBOFLOW_API_URL, api_key=api_key)
 
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)
@@ -210,7 +211,7 @@ def run(
         ball_frame = tracks["ball"][frame_idx]
 
         # Run pitch keypoint detection
-        result = pitch_model.infer(frame, confidence=0.3)[0]
+        result = pitch_client.infer(frame, model_id=FIELD_DETECTION_MODEL_ID)
         keypoints = sv.KeyPoints.from_inference(result)
 
         # Filter low confidence keypoints

@@ -9,3 +9,5 @@ opencv-python-headless==4.9.0.80
 filterpy==1.4.5
 tqdm==4.67.1
 gdown==5.2.0
+inference-sdk
+python-dotenv

@@ -55,21 +55,15 @@ def get_frame_generator(
     Returns:
         Iterator yielding annotated frames
     """
-    from config import PITCH_DETECTION_MODEL_PATH
-    from .pitch import run as run_pitch
-    from .players import run as run_players
-    from .ball import run as run_ball
-    from .tracking import run as run_tracking
-    from .team import run as run_team
-    from .all import run as run_all
-    from .radar import run as run_radar
+    # Lazy imports - only import the module needed for the requested mode
+    # This avoids loading umap/numba when running pitch mode with inference
 
     if mode == Mode.PITCH_DETECTION:
-        if not PITCH_DETECTION_MODEL_PATH.exists():
-            raise FileNotFoundError(f"Pitch model not found: {PITCH_DETECTION_MODEL_PATH}")
+        from .pitch import run as run_pitch
         return run_pitch(source_video_path=source_video_path, device=device, debug=debug_pitch)
 
     if mode == Mode.PLAYER_DETECTION:
+        from .players import run as run_players
         return run_players(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
@@ -78,6 +72,7 @@ def get_frame_generator(
         )
 
     if mode == Mode.BALL_DETECTION:
+        from .ball import run as run_ball
         return run_ball(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
@@ -89,6 +84,7 @@ def get_frame_generator(
         )
 
     if mode == Mode.PLAYER_TRACKING:
+        from .tracking import run as run_tracking
         return run_tracking(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
@@ -97,6 +93,7 @@ def get_frame_generator(
         )
 
     if mode == Mode.TEAM_CLASSIFICATION:
+        from .team import run as run_team
         return run_team(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
@@ -108,6 +105,7 @@ def get_frame_generator(
         )
 
     if mode == Mode.ALL:
+        from .all import run as run_all
         return run_all(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
@@ -123,8 +121,7 @@ def get_frame_generator(
         )
 
     if mode == Mode.RADAR:
-        if not PITCH_DETECTION_MODEL_PATH.exists():
-            raise FileNotFoundError(f"Pitch model not found: {PITCH_DETECTION_MODEL_PATH}")
+        from .radar import run as run_radar
         return run_radar(
             source_video_path=source_video_path,
             read_from_stub=read_from_stub,
