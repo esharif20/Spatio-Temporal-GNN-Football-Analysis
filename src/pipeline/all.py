@@ -1,17 +1,17 @@
 """All pipeline mode - runs all stages."""
 
+import os
 from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
 import numpy as np
 import supervision as sv
-from ultralytics import YOLO
+from dotenv import load_dotenv
+from inference import get_model
 from tqdm import tqdm
 
 from config import (
     BALL_DETECTION_MODEL_PATH,
-    IMG_SIZE,
-    PITCH_DETECTION_MODEL_PATH,
     CONF_THRESHOLD,
     TEAM_STRIDE,
     TEAM_BATCH_SIZE,
@@ -20,6 +20,12 @@ from config import (
     DEFAULT_VIDEO_FPS,
     OUTPUT_DIR,
 )
+
+# Load environment variables
+load_dotenv()
+
+# Roboflow model ID - same as notebook for correct keypoint ordering
+FIELD_DETECTION_MODEL_ID = "football-field-detection-f07vi/14"
 from utils.drawing import draw_keypoints
 from trackers.track_stabiliser import stabilise_tracks
 from team_assigner import TeamAssigner, TeamAssignerConfig
@@ -41,81 +47,57 @@ from .base import load_frames, build_tracker, get_stub_path
 if TYPE_CHECKING:
     from trackers.ball_config import BallConfig
 
-# Keypoint confidence threshold - lowered for better coverage
-KEYPOINT_CONF_THRESHOLD = 0.35
+# Keypoint confidence threshold - matches notebook's 0.5 to filter noisy detections
+KEYPOINT_CONF_THRESHOLD = 0.5
 PITCH_MODEL_CONF_THRESHOLD = 0.3
-PITCH_BATCH_SIZE_CAP = 16
-
-
-def _pitch_batch_size(pitch_model: YOLO, det_batch_size: int) -> int:
-    if det_batch_size > 0:
-        return max(1, min(det_batch_size, PITCH_BATCH_SIZE_CAP))
-
-    device_type = str(getattr(pitch_model.device, "type", pitch_model.device))
-    if device_type.startswith("cuda"):
-        return PITCH_BATCH_SIZE_CAP
-    if device_type == "mps":
-        return 1
-    return min(8, PITCH_BATCH_SIZE_CAP)
 
 
 def _precompute_pitch_keypoints(
     frames: list[np.ndarray],
-    pitch_model: YOLO,
+    pitch_model,
     pitch_config: SoccerPitchConfiguration,
-    det_batch_size: int,
 ) -> list[dict]:
+    """Precompute pitch keypoints for all frames using Roboflow model."""
     pitch_vertices = np.array(pitch_config.vertices, dtype=np.float32)
     num_vertices = len(pitch_vertices)
-    batch_size = _pitch_batch_size(pitch_model, det_batch_size)
     pitch_data = []
 
-    for start in tqdm(
-        range(0, len(frames), batch_size),
-        desc="Pitch keypoints",
-        unit="frame",
-    ):
-        batch = frames[start:start + batch_size]
-        results = pitch_model.predict(
-            batch,
-            conf=PITCH_MODEL_CONF_THRESHOLD,
-            imgsz=IMG_SIZE,
-            verbose=False,
-        )
-        for result in results:
-            keypoints = sv.KeyPoints.from_ultralytics(result)
-            conf_mask = np.zeros(num_vertices, dtype=bool)
-            frame_keypoints = np.empty((0, 2), dtype=np.float32)
-            pitch_keypoints = np.empty((0, 2), dtype=np.float32)
+    for frame in tqdm(frames, desc="Pitch keypoints", unit="frame"):
+        result = pitch_model.infer(frame, confidence=PITCH_MODEL_CONF_THRESHOLD)[0]
+        keypoints = sv.KeyPoints.from_inference(result)
 
-            if keypoints.confidence is not None and len(keypoints.confidence) > 0:
-                conf = keypoints.confidence[0]
-                if conf.shape[0] == num_vertices:
-                    conf_mask = conf > KEYPOINT_CONF_THRESHOLD
+        conf_mask = np.zeros(num_vertices, dtype=bool)
+        frame_keypoints = np.empty((0, 2), dtype=np.float32)
+        pitch_keypoints = np.empty((0, 2), dtype=np.float32)
 
-            if conf_mask.any() and keypoints.xy is not None and len(keypoints.xy) > 0:
-                xy = keypoints.xy[0]
-                if xy.shape[0] == num_vertices:
-                    frame_keypoints = xy[conf_mask].astype(np.float32)
-                    pitch_keypoints = pitch_vertices[conf_mask]
+        if keypoints.confidence is not None and len(keypoints.confidence) > 0:
+            conf = keypoints.confidence[0]
+            if conf.shape[0] == num_vertices:
+                conf_mask = conf > KEYPOINT_CONF_THRESHOLD
 
-            full_frame_points = None
-            if frame_keypoints.shape[0] >= 4:
-                try:
-                    transformer = ViewTransformer(
-                        source=pitch_keypoints.astype(np.float32),
-                        target=frame_keypoints.astype(np.float32)
-                    )
-                    full_frame_points = transformer.transform_points(pitch_vertices)
-                except ValueError:
-                    pass
+        if conf_mask.any() and keypoints.xy is not None and len(keypoints.xy) > 0:
+            xy = keypoints.xy[0]
+            if xy.shape[0] == num_vertices:
+                frame_keypoints = xy[conf_mask].astype(np.float32)
+                pitch_keypoints = pitch_vertices[conf_mask]
 
-            pitch_data.append({
-                "frame_keypoints": frame_keypoints,
-                "pitch_keypoints": pitch_keypoints,
-                "conf_mask": conf_mask,
-                "full_frame_points": full_frame_points,
-            })
+        full_frame_points = None
+        if frame_keypoints.shape[0] >= 4:
+            try:
+                transformer = ViewTransformer(
+                    source=pitch_keypoints.astype(np.float32),
+                    target=frame_keypoints.astype(np.float32)
+                )
+                full_frame_points = transformer.transform_points(pitch_vertices)
+            except ValueError:
+                pass
+
+        pitch_data.append({
+            "frame_keypoints": frame_keypoints,
+            "pitch_keypoints": pitch_keypoints,
+            "conf_mask": conf_mask,
+            "full_frame_points": full_frame_points,
+        })
 
     return pitch_data
 
@@ -151,11 +133,14 @@ def run(
     Yields:
         Annotated frames with full analysis
     """
-    # Load pitch model if available
+    # Load Roboflow pitch detection model
     pitch_model = None
-    if PITCH_DETECTION_MODEL_PATH.exists():
+    api_key = os.environ.get("ROBOFLOW_API_KEY")
+    if api_key:
         print("Loading pitch detection model...")
-        pitch_model = YOLO(str(PITCH_DETECTION_MODEL_PATH)).to(device=device)
+        pitch_model = get_model(model_id=FIELD_DETECTION_MODEL_ID, api_key=api_key)
+    else:
+        print("Warning: ROBOFLOW_API_KEY not set, pitch detection disabled")
 
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)
@@ -247,7 +232,6 @@ def run(
             frames=frames,
             pitch_model=pitch_model,
             pitch_config=pitch_config,
-            det_batch_size=det_batch_size,
         )
 
     # Analytics engine (only initialized if analytics enabled)

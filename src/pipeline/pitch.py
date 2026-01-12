@@ -1,5 +1,6 @@
 """Pitch detection pipeline mode."""
 
+import os
 from collections import deque
 from typing import Iterator, Optional
 
@@ -7,11 +8,17 @@ import cv2
 import numpy as np
 import numpy.typing as npt
 import supervision as sv
-from ultralytics import YOLO
+from dotenv import load_dotenv
+from inference import get_model
 
-from config import IMG_SIZE, PITCH_DETECTION_MODEL_PATH
 from pitch import SoccerPitchConfiguration, ViewTransformer, draw_pitch_keypoints_on_frame
 from .base import load_frames
+
+# Load environment variables
+load_dotenv()
+
+# Roboflow model ID - same as notebook for correct keypoint ordering
+FIELD_DETECTION_MODEL_ID = "football-field-detection-f07vi/14"
 
 # Keypoint confidence threshold - matches notebook's 0.5 to filter noisy detections
 KEYPOINT_CONF_THRESHOLD = 0.5
@@ -279,10 +286,14 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
     Yields:
         Annotated frames with pitch keypoints and edges
     """
-    if not PITCH_DETECTION_MODEL_PATH.exists():
-        raise FileNotFoundError(f"Pitch model not found: {PITCH_DETECTION_MODEL_PATH}")
-
-    model = YOLO(str(PITCH_DETECTION_MODEL_PATH)).to(device=device)
+    # Load Roboflow pitch detection model
+    api_key = os.environ.get("ROBOFLOW_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "ROBOFLOW_API_KEY environment variable not set. "
+            "Get your key from https://app.roboflow.com/settings/api"
+        )
+    model = get_model(model_id=FIELD_DETECTION_MODEL_ID, api_key=api_key)
     pitch_config = SoccerPitchConfiguration()
     frames = load_frames(source_video_path)
 
@@ -317,13 +328,8 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
         print("\nCompare detected indices with these locations!\n")
 
     for frame_idx, frame in enumerate(frames):
-        result = model(
-            frame,
-            verbose=False,
-            conf=PITCH_MODEL_CONF_THRESHOLD,
-            imgsz=IMG_SIZE,
-        )[0]
-        keypoints = sv.KeyPoints.from_ultralytics(result)
+        result = model.infer(frame, confidence=PITCH_MODEL_CONF_THRESHOLD)[0]
+        keypoints = sv.KeyPoints.from_inference(result)
 
         # Debug mode: show all keypoints with their indices
         if debug:

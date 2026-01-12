@@ -1,15 +1,15 @@
 """Radar/tactical view pipeline mode - projects players onto 2D pitch."""
 
+import os
 from collections import deque
 from typing import Iterator, List, Optional, TYPE_CHECKING
 
 import numpy as np
 import supervision as sv
-from ultralytics import YOLO
+from dotenv import load_dotenv
+from inference import get_model
 
 from config import (
-    PITCH_DETECTION_MODEL_PATH,
-    BALL_DETECTION_MODEL_PATH,
     CONF_THRESHOLD,
     TEAM_STRIDE,
     TEAM_BATCH_SIZE,
@@ -17,6 +17,12 @@ from config import (
     TEAM_MIN_CROP_SIZE,
     DEFAULT_VIDEO_FPS,
 )
+
+# Load environment variables
+load_dotenv()
+
+# Roboflow model ID - same as notebook for correct keypoint ordering
+FIELD_DETECTION_MODEL_ID = "football-field-detection-f07vi/14"
 from pitch import (
     SoccerPitchConfiguration,
     ViewTransformer,
@@ -110,15 +116,15 @@ def run(
     Yields:
         Annotated frames with radar overlay
     """
-    # Check pitch detection model exists
-    if not PITCH_DETECTION_MODEL_PATH.exists():
-        raise FileNotFoundError(
-            f"Pitch detection model not found: {PITCH_DETECTION_MODEL_PATH}\n"
-            "Run setup.sh to download the models."
+    # Load Roboflow pitch detection model
+    api_key = os.environ.get("ROBOFLOW_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "ROBOFLOW_API_KEY environment variable not set. "
+            "Get your key from https://app.roboflow.com/settings/api"
         )
-
     print("Loading pitch detection model...")
-    pitch_model = YOLO(str(PITCH_DETECTION_MODEL_PATH)).to(device=device)
+    pitch_model = get_model(model_id=FIELD_DETECTION_MODEL_ID, api_key=api_key)
 
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)
@@ -204,8 +210,8 @@ def run(
         ball_frame = tracks["ball"][frame_idx]
 
         # Run pitch keypoint detection
-        result = pitch_model(frame, verbose=False)[0]
-        keypoints = sv.KeyPoints.from_ultralytics(result)
+        result = pitch_model.infer(frame, confidence=0.3)[0]
+        keypoints = sv.KeyPoints.from_inference(result)
 
         # Filter low confidence keypoints
         if keypoints.confidence is not None and len(keypoints.confidence) > 0:
