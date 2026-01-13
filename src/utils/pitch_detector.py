@@ -51,7 +51,12 @@ class PitchDetector:
         self.imgsz = int(imgsz)
 
         if self.backend == "inference":
-            self._load_env_file(ENV_FILE)
+            env_candidates = [
+                ENV_FILE,
+                ENV_FILE.parent.parent / ".env",
+                Path.cwd() / ".env",
+            ]
+            self._load_env_files(env_candidates)
             api_key = os.getenv(self.api_key_env)
             if not api_key:
                 raise ValueError(
@@ -92,18 +97,19 @@ class PitchDetector:
         scale_y = height / self.imgsz
         return resized, scale_x, scale_y
 
-    def _load_env_file(self, env_path: Path) -> None:
-        """Load KEY=VALUE pairs from a .env file if present."""
-        if not env_path.exists():
-            return
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
+    def _load_env_files(self, env_paths: list[Path]) -> None:
+        """Load KEY=VALUE pairs from .env files, if present."""
+        for env_path in env_paths:
+            if not env_path.exists():
                 continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            os.environ.setdefault(key, value)
+            for line in env_path.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                os.environ.setdefault(key, value)
 
     def detect(self, frame: np.ndarray) -> sv.KeyPoints:
         """Detect pitch keypoints in a frame.
