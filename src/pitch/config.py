@@ -17,11 +17,12 @@ class SoccerPitchConfiguration:
     Roboflow pitch detection model.
     """
 
-    width: int = 6800   # [cm] - standard FIFA: 64-75m, using 68m
-    length: int = 10500  # [cm] - standard FIFA: 100-110m, using 105m
-    penalty_box_width: int = 4032  # [cm] - 40.32m
-    penalty_box_length: int = 1650  # [cm] - 16.5m
-    goal_box_width: int = 1832  # [cm] - 18.32m (5.5m each side of goal)
+    # Dimensions matching Roboflow sports repository (used for model training)
+    width: int = 7000   # [cm] - 70m (sports repo value)
+    length: int = 12000  # [cm] - 120m (sports repo value)
+    penalty_box_width: int = 4100  # [cm] - 41m (7000 - 2*1450)
+    penalty_box_length: int = 2015  # [cm] - 20.15m (sports repo value)
+    goal_box_width: int = 1832  # [cm] - 18.32m (7000 - 2*2584)
     goal_box_length: int = 550  # [cm] - 5.5m
     centre_circle_radius: int = 915  # [cm] - 9.15m
     penalty_spot_distance: int = 1100  # [cm] - 11m from goal line
