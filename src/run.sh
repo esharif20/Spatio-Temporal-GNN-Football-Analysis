@@ -39,6 +39,7 @@ VORONOI_OVERLAY=0
 NO_RADAR=0
 ANALYTICS=0
 DEBUG_PITCH=0
+PITCH_BACKEND=""
 
 lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
@@ -263,6 +264,18 @@ while [[ $# -gt 0 ]]; do
       DEBUG_PITCH=1
       shift
       ;;
+    --pitch-local)
+      PITCH_BACKEND="ultralytics"
+      shift
+      ;;
+    --pitch-backend)
+      if [[ -z "${2:-}" ]]; then
+        echo "Missing value for --pitch-backend" >&2
+        exit 1
+      fi
+      PITCH_BACKEND="$2"
+      shift 2
+      ;;
     *)
       if [[ -z "$MODE_INPUT" ]]; then
         MODE_INPUT="$1"
@@ -431,6 +444,9 @@ if [[ "$ANALYTICS" -eq 1 ]]; then
 fi
 if [[ "$DEBUG_PITCH" -eq 1 ]]; then
   cmd+=(--debug-pitch)
+fi
+if [[ -n "$PITCH_BACKEND" ]]; then
+  cmd+=(--pitch-backend "$PITCH_BACKEND")
 fi
 
 "${cmd[@]}"
