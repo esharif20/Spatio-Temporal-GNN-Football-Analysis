@@ -17,7 +17,7 @@ class PitchDetector:
         self,
         device: str = "cpu",
         conf_threshold: float = 0.3,
-        stretch: bool = True,
+        stretch: bool = False,
         imgsz: int = 640,
     ) -> None:
         """Initialize the pitch detector.

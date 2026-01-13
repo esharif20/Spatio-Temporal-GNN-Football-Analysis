@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import supervision as sv
 
+from config import PITCH_MODEL_IMG_SIZE, PITCH_MODEL_STRETCH
 from pitch import SoccerPitchConfiguration, ViewTransformer, draw_pitch_keypoints_on_frame
 from utils.pitch_detector import PitchDetector
 from .base import load_frames
@@ -154,7 +155,12 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
     """
     # Load local pitch detection model
     print("Loading pitch detection model...")
-    pitch_detector = PitchDetector(device=device, conf_threshold=PITCH_MODEL_CONF_THRESHOLD)
+    pitch_detector = PitchDetector(
+        device=device,
+        conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
+        stretch=PITCH_MODEL_STRETCH,
+        imgsz=PITCH_MODEL_IMG_SIZE,
+    )
     pitch_config = SoccerPitchConfiguration()
     frames = load_frames(source_video_path)
 

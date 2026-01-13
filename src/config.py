@@ -30,6 +30,8 @@ NMS_IOU = 0.70
 MAX_DET = 300
 PAD_BALL = 10
 DETECTION_BATCH_SIZE = 0
+PITCH_MODEL_IMG_SIZE = 640
+PITCH_MODEL_STRETCH = True  # Blog recommends stretch over letterbox for this model
 
 # =============================================================================
 # Ball Tracking Defaults

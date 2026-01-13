@@ -13,6 +13,8 @@ from config import (
     TEAM_MAX_CROPS,
     TEAM_MIN_CROP_SIZE,
     DEFAULT_VIDEO_FPS,
+    PITCH_MODEL_IMG_SIZE,
+    PITCH_MODEL_STRETCH,
 )
 from utils.pitch_detector import PitchDetector
 from pitch import (
@@ -112,7 +114,12 @@ def run(
     """
     # Load local pitch detection model
     print("Loading pitch detection model...")
-    pitch_detector = PitchDetector(device=device, conf_threshold=PITCH_MODEL_CONF_THRESHOLD)
+    pitch_detector = PitchDetector(
+        device=device,
+        conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
+        stretch=PITCH_MODEL_STRETCH,
+        imgsz=PITCH_MODEL_IMG_SIZE,
+    )
 
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)

@@ -16,6 +16,8 @@ from config import (
     TEAM_MIN_CROP_SIZE,
     DEFAULT_VIDEO_FPS,
     OUTPUT_DIR,
+    PITCH_MODEL_IMG_SIZE,
+    PITCH_MODEL_STRETCH,
 )
 from utils.drawing import draw_keypoints
 from utils.pitch_detector import PitchDetector
@@ -129,7 +131,12 @@ def run(
     needs_pitch = show_keypoints or voronoi_overlay or not no_radar
     if needs_pitch:
         print("Loading pitch detection model...")
-        pitch_detector = PitchDetector(device=device, conf_threshold=PITCH_MODEL_CONF_THRESHOLD)
+        pitch_detector = PitchDetector(
+            device=device,
+            conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
+            stretch=PITCH_MODEL_STRETCH,
+            imgsz=PITCH_MODEL_IMG_SIZE,
+        )
 
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)
@@ -208,7 +215,7 @@ def run(
             window_size=15,
             decay=0.8,
             min_inliers=6,
-            position_alpha=0.4,
+            position_alpha=0.3,  # Lowered for smoother radar positions
         )
 
     pitch_data = None
