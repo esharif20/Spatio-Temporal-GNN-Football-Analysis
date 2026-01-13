@@ -1,5 +1,6 @@
 """Pitch detection pipeline mode."""
 
+from collections import deque
 from typing import Iterator
 
 import cv2
@@ -17,6 +18,8 @@ KEYPOINT_CONF_THRESHOLD = 0.5
 PITCH_MODEL_CONF_THRESHOLD = 0.3
 # Minimum keypoints required for homography
 MIN_KEYPOINTS_FOR_HOMOGRAPHY = 4
+# Homography smoothing window size (blog uses 5)
+HOMOGRAPHY_SMOOTH_WINDOW = 5
 
 
 def draw_debug_keypoints(
@@ -168,6 +171,9 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
     pitch_all_vertices = np.array(pitch_config.vertices, dtype=np.float32)
     num_vertices = len(pitch_all_vertices)
 
+    # Homography smoothing buffer (like the blog's deque approach)
+    homography_buffer: deque = deque(maxlen=HOMOGRAPHY_SMOOTH_WINDOW)
+
     if debug:
         print("\n=== DEBUG MODE: Keypoint Index Visualization ===")
         print(f"Confidence threshold: {KEYPOINT_CONF_THRESHOLD}")
@@ -229,7 +235,7 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
                 f"(indices: {list(detected_indices)[:10]}{'...' if len(detected_indices) > 10 else ''})"
             )
 
-        # Compute homography if enough keypoints (blog-style, per-frame)
+        # Compute homography if enough keypoints (blog-style with temporal smoothing)
         full_frame_points = None
         if num_detected >= MIN_KEYPOINTS_FOR_HOMOGRAPHY:
             try:
@@ -237,6 +243,10 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
                     source=pitch_keypoints.astype(np.float32),
                     target=frame_keypoints.astype(np.float32)
                 )
+                # Add to smoothing buffer and compute averaged matrix (blog approach)
+                homography_buffer.append(transformer.matrix.copy())
+                smoothed_matrix = np.mean(np.array(homography_buffer), axis=0)
+                transformer.matrix = smoothed_matrix
                 full_frame_points = transformer.transform_points(pitch_all_vertices)
             except ValueError:
                 pass  # Homography failed for this frame
