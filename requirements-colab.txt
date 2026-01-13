@@ -10,3 +10,4 @@ filterpy==1.4.5
 tqdm==4.67.1
 gdown==5.2.0
 python-dotenv
+inference>=0.18.0
