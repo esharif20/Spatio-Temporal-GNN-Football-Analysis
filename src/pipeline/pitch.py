@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from pitch import SoccerPitchConfiguration, ViewTransformer, HomographySmoother, draw_pitch_keypoints_on_frame
+from pitch import SoccerPitchConfiguration, ViewTransformer, draw_pitch_keypoints_on_frame
 from utils.pitch_detector import PitchDetector
 from .base import load_frames
 
@@ -138,31 +138,11 @@ def draw_pitch_outline(
     return annotated
 
 
-def transform_points_with_matrix(
-    points: np.ndarray,
-    matrix: npt.NDArray[np.float64],
-) -> np.ndarray:
-    """Transform points using a homography matrix directly.
-
-    Args:
-        points: Points to transform, shape (N, 2).
-        matrix: 3x3 homography matrix.
-
-    Returns:
-        Transformed points, shape (N, 2).
-    """
-    if points.size == 0:
-        return points.copy()
-
-    reshaped = points.reshape(-1, 1, 2).astype(np.float32)
-    transformed = cv2.perspectiveTransform(reshaped, matrix)
-    return transformed.reshape(-1, 2).astype(np.float32)
-
-
 def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np.ndarray]:
-    """Run pitch detection mode with homography smoothing.
+    """Run pitch detection mode with per-frame homography.
 
-    Uses the same HomographySmoother as all.py for consistent results.
+    Mirrors the notebook approach: per-frame homography from filtered keypoints
+    without temporal smoothing to keep projection aligned to the current frame.
 
     Args:
         source_video_path: Path to input video
@@ -177,13 +157,6 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
     pitch_detector = PitchDetector(device=device, conf_threshold=PITCH_MODEL_CONF_THRESHOLD)
     pitch_config = SoccerPitchConfiguration()
     frames = load_frames(source_video_path)
-
-    # Use same smoother settings as all.py for consistent results
-    smoother = HomographySmoother(
-        window_size=15,
-        decay=0.8,
-        min_inliers=6,
-    )
 
     # Pre-compute pitch vertices array once
     pitch_all_vertices = np.array(pitch_config.vertices, dtype=np.float32)
@@ -250,37 +223,17 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
                 f"(indices: {list(detected_indices)[:10]}{'...' if len(detected_indices) > 10 else ''})"
             )
 
-        # Compute homography if enough keypoints (same logic as all.py)
-        smoothed_matrix = None
+        # Compute homography if enough keypoints (blog-style, per-frame)
         full_frame_points = None
-
         if num_detected >= MIN_KEYPOINTS_FOR_HOMOGRAPHY:
             try:
                 transformer = ViewTransformer(
                     source=pitch_keypoints.astype(np.float32),
                     target=frame_keypoints.astype(np.float32)
                 )
-
-                # Use smoother to get stable homography
-                smoothed_matrix = smoother.update_homography(transformer, frame_idx)
-
-                if smoothed_matrix is not None:
-                    # Project all pitch vertices using smoothed matrix
-                    full_frame_points = transform_points_with_matrix(
-                        pitch_all_vertices,
-                        smoothed_matrix,
-                    )
+                full_frame_points = transformer.transform_points(pitch_all_vertices)
             except ValueError:
-                pass  # Homography failed, use fallback if available
-
-        # Fallback to last valid homography if available
-        if smoothed_matrix is None and smoother.has_valid_homography:
-            smoothed_matrix = smoother._last_good_matrix
-            if smoothed_matrix is not None:
-                full_frame_points = transform_points_with_matrix(
-                    pitch_all_vertices,
-                    smoothed_matrix,
-                )
+                pass  # Homography failed for this frame
 
         # Draw pitch outline using smoothed homography
         if full_frame_points is not None:
