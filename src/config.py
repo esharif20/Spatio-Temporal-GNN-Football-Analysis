@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 MODELS_DIR = ROOT / "models"
+ENV_FILE = ROOT / ".env"
 
 # Model paths (all consolidated in models/ directory)
 PLAYER_DETECTION_MODEL_PATH = MODELS_DIR / "player_detection.pt"
@@ -32,6 +33,12 @@ PAD_BALL = 10
 DETECTION_BATCH_SIZE = 0
 PITCH_MODEL_IMG_SIZE = 640
 PITCH_MODEL_STRETCH = True  # Match blog-style stretched 640x640 preprocessing
+PITCH_MODEL_BACKEND = "inference"  # "inference" for Roboflow API, "ultralytics" for local
+PITCH_MODEL_ID = "football-field-detection-f07vi/14"
+ROBOFLOW_API_KEY_ENV = "ROBOFLOW_API_KEY"
+PITCH_OUTLINE_MIN_KEYPOINTS = 4
+PITCH_OUTLINE_REQUIRE_SPREAD = False
+PITCH_OUTLINE_MIN_SPREAD = 200.0
 
 # =============================================================================
 # Ball Tracking Defaults

@@ -16,8 +16,11 @@ from config import (
     TEAM_MIN_CROP_SIZE,
     DEFAULT_VIDEO_FPS,
     OUTPUT_DIR,
+    PITCH_MODEL_BACKEND,
+    PITCH_MODEL_ID,
     PITCH_MODEL_IMG_SIZE,
     PITCH_MODEL_STRETCH,
+    ROBOFLOW_API_KEY_ENV,
 )
 from utils.drawing import draw_keypoints
 from utils.pitch_detector import PitchDetector
@@ -131,12 +134,15 @@ def run(
     needs_pitch = show_keypoints or voronoi_overlay or not no_radar
     if needs_pitch:
         print("Loading pitch detection model...")
-        pitch_detector = PitchDetector(
-            device=device,
-            conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
-            stretch=PITCH_MODEL_STRETCH,
-            imgsz=PITCH_MODEL_IMG_SIZE,
-        )
+    pitch_detector = PitchDetector(
+        device=device,
+        conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
+        stretch=PITCH_MODEL_STRETCH,
+        imgsz=PITCH_MODEL_IMG_SIZE,
+        backend=PITCH_MODEL_BACKEND,
+        model_id=PITCH_MODEL_ID,
+        api_key_env=ROBOFLOW_API_KEY_ENV,
+    )
 
     print("Tracking players/referees/goalkeepers and ball...")
     frames = load_frames(source_video_path)

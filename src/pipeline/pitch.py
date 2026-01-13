@@ -6,8 +6,17 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from config import PITCH_MODEL_IMG_SIZE, PITCH_MODEL_STRETCH
-from pitch import SoccerPitchConfiguration, ViewTransformer, draw_pitch_keypoints_on_frame
+from config import (
+    PITCH_MODEL_BACKEND,
+    PITCH_MODEL_ID,
+    PITCH_MODEL_IMG_SIZE,
+    PITCH_MODEL_STRETCH,
+    PITCH_OUTLINE_MIN_KEYPOINTS,
+    PITCH_OUTLINE_MIN_SPREAD,
+    PITCH_OUTLINE_REQUIRE_SPREAD,
+    ROBOFLOW_API_KEY_ENV,
+)
+from pitch import SoccerPitchConfiguration, ViewTransformer
 from utils.pitch_detector import PitchDetector
 from .base import load_frames
 
@@ -17,12 +26,6 @@ KEYPOINT_CONF_THRESHOLD = 0.5
 PITCH_MODEL_CONF_THRESHOLD = 0.3
 # Minimum keypoints required for homography
 MIN_KEYPOINTS_FOR_HOMOGRAPHY = 4
-# Minimum keypoints required to draw full pitch outline
-MIN_KEYPOINTS_FOR_OUTLINE = 8
-# Minimum spread (pixels) in both axes for stable outline projection
-MIN_KEYPOINT_SPREAD = 200.0
-
-
 def draw_debug_keypoints(
     frame: np.ndarray,
     keypoints_xy: np.ndarray,
@@ -89,63 +92,9 @@ def draw_debug_keypoints(
     return annotated
 
 
-def draw_pitch_outline(
-    frame: np.ndarray,
-    projected_vertices: np.ndarray,
-    pitch_config: SoccerPitchConfiguration,
-    line_color: tuple = (0, 191, 255),  # Deep sky blue
-    line_thickness: int = 2,
-    vertex_color: tuple = (255, 20, 147),  # Deep pink
-    vertex_radius: int = 5,
-    draw_vertices: bool = True,
-) -> np.ndarray:
-    """Draw the full pitch outline using projected vertices.
-
-    Unlike draw_pitch_keypoints_on_frame, this draws ALL edges using
-    the full projected vertex set, ensuring a complete pitch outline.
-
-    Args:
-        frame: Video frame to annotate.
-        projected_vertices: All 32 projected vertices, shape (32, 2).
-        pitch_config: Pitch configuration with edge definitions.
-        line_color: BGR color for pitch lines.
-        line_thickness: Line thickness in pixels.
-        vertex_color: BGR color for vertex dots.
-        vertex_radius: Vertex dot radius.
-        draw_vertices: Whether to draw vertex dots.
-
-    Returns:
-        Annotated frame with pitch outline.
-    """
-    annotated = frame.copy()
-    h, w = frame.shape[:2]
-
-    # Draw all edges from config
-    for start_idx, end_idx in pitch_config.edges:
-        # Edges use 1-based indexing
-        pt1 = projected_vertices[start_idx - 1]
-        pt2 = projected_vertices[end_idx - 1]
-
-        # Clip to frame bounds (with margin for visibility)
-        pt1_int = (int(np.clip(pt1[0], -100, w + 100)), int(np.clip(pt1[1], -100, h + 100)))
-        pt2_int = (int(np.clip(pt2[0], -100, w + 100)), int(np.clip(pt2[1], -100, h + 100)))
-
-        cv2.line(annotated, pt1_int, pt2_int, line_color, line_thickness, cv2.LINE_AA)
-
-    # Draw vertices
-    if draw_vertices:
-        for pt in projected_vertices:
-            x, y = int(pt[0]), int(pt[1])
-            # Only draw if within or near frame
-            if -50 < x < w + 50 and -50 < y < h + 50:
-                cv2.circle(annotated, (x, y), vertex_radius, vertex_color, -1, cv2.LINE_AA)
-
-    return annotated
-
-
 def keypoints_well_distributed(
     keypoints: np.ndarray,
-    min_spread: float = MIN_KEYPOINT_SPREAD,
+    min_spread: float = PITCH_OUTLINE_MIN_SPREAD,
 ) -> bool:
     """Check if keypoints are well-distributed (not collinear)."""
     if len(keypoints) < 4:
@@ -176,6 +125,9 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
         conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
         stretch=PITCH_MODEL_STRETCH,
         imgsz=PITCH_MODEL_IMG_SIZE,
+        backend=PITCH_MODEL_BACKEND,
+        model_id=PITCH_MODEL_ID,
+        api_key_env=ROBOFLOW_API_KEY_ENV,
     )
     pitch_config = SoccerPitchConfiguration()
     frames = load_frames(source_video_path)
@@ -183,6 +135,20 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
     # Pre-compute pitch vertices array once
     pitch_all_vertices = np.array(pitch_config.vertices, dtype=np.float32)
     num_vertices = len(pitch_all_vertices)
+
+    edge_annotator = sv.EdgeAnnotator(
+        color=sv.Color.from_hex('#00BFFF'),
+        thickness=2,
+        edges=pitch_config.edges,
+    )
+    vertex_annotator_all = sv.VertexAnnotator(
+        color=sv.Color.from_hex('#00BFFF'),
+        radius=4,
+    )
+    vertex_annotator_detected = sv.VertexAnnotator(
+        color=sv.Color.from_hex('#FF1493'),
+        radius=6,
+    )
 
     if debug:
         print("\n=== DEBUG MODE: Keypoint Index Visualization ===")
@@ -245,13 +211,12 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
                 f"(indices: {list(detected_indices)[:10]}{'...' if len(detected_indices) > 10 else ''})"
             )
 
-        # Compute homography per-frame (blog-style) only when outline is stable
+        # Compute homography per-frame (blog-style)
         full_frame_points = None
-        if (
-            num_detected >= MIN_KEYPOINTS_FOR_HOMOGRAPHY
-            and num_detected >= MIN_KEYPOINTS_FOR_OUTLINE
-            and keypoints_well_distributed(frame_keypoints)
-        ):
+        outline_ok = num_detected >= max(MIN_KEYPOINTS_FOR_HOMOGRAPHY, PITCH_OUTLINE_MIN_KEYPOINTS)
+        if outline_ok and PITCH_OUTLINE_REQUIRE_SPREAD:
+            outline_ok = keypoints_well_distributed(frame_keypoints)
+        if outline_ok:
             try:
                 transformer = ViewTransformer(
                     source=pitch_keypoints.astype(np.float32),
@@ -261,30 +226,18 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
             except ValueError:
                 pass  # Homography failed for this frame
 
-        # Draw pitch outline using smoothed homography
+        # Draw full pitch outline in camera space (blog-style)
         if full_frame_points is not None:
-            frame = draw_pitch_outline(
-                frame=frame,
-                projected_vertices=full_frame_points,
-                pitch_config=pitch_config,
-                line_color=(0, 191, 255),  # Deep sky blue
-                line_thickness=2,
-                vertex_color=(0, 191, 255),
-                vertex_radius=4,
-                draw_vertices=True,
-            )
+            frame_all_key_points = sv.KeyPoints(xy=full_frame_points[np.newaxis, ...])
+            frame = edge_annotator.annotate(scene=frame, key_points=frame_all_key_points)
+            frame = vertex_annotator_all.annotate(scene=frame, key_points=frame_all_key_points)
 
-        # Draw detected reference keypoints on top (in contrasting color)
+        # Draw detected reference keypoints on top (pink)
         if num_detected > 0:
-            frame = draw_pitch_keypoints_on_frame(
-                frame=frame,
-                frame_keypoints=frame_keypoints,
-                pitch_config=pitch_config,
-                detected_indices=conf_mask,
-                vertex_color=sv.Color.from_hex("#FF1493"),
-                edge_color=sv.Color.from_hex("#FF1493"),
-                vertex_radius=6,
-                edge_thickness=1,
+            frame_reference_key_points = sv.KeyPoints(xy=frame_keypoints[np.newaxis, ...])
+            frame = vertex_annotator_detected.annotate(
+                scene=frame,
+                key_points=frame_reference_key_points,
             )
 
         yield frame
