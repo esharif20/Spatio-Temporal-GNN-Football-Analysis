@@ -50,22 +50,73 @@ if [[ -n "$CACHE_ROOT" ]]; then
   fi
 fi
 
-if [[ "${SKIP_ASSETS:-0}" != "1" ]]; then
-  if [[ -f "$ROOT/src/setup.sh" ]]; then
-    echo "Downloading models and sample videos..."
-    if ! bash "$ROOT/src/setup.sh"; then
-      echo "WARNING: setup.sh failed, trying direct downloads..." >&2
-      mkdir -p "$ROOT/src/models" "$ROOT/src/input_videos"
-      # Try downloading directly with gdown
-      gdown -O "$ROOT/src/models/ball_detection.pt" "https://drive.google.com/uc?id=1isw4wx-MK9h9LMr36VvIWlJD6ppUvw7V" || echo "Failed to download ball_detection.pt"
-      gdown -O "$ROOT/src/models/player_detection.pt" "https://drive.google.com/uc?id=17PXFNlx-jI7VjVo_vQnB1sONjRyvoB-q" || echo "Failed to download player_detection.pt"
-      gdown -O "$ROOT/src/models/pitch_detection.pt" "https://drive.google.com/uc?id=1Ma5Kt86tgpdjCTKfum79YMgNnSjcoOyf" || echo "Failed to download pitch_detection.pt"
-      gdown -O "$ROOT/src/input_videos/0bfacc_0.mp4" "https://drive.google.com/uc?id=12TqauVZ9tLAv8kWxTTBFWtgt2hNQ4_ZF" || echo "Failed to download 0bfacc_0.mp4"
-      gdown -O "$ROOT/src/input_videos/121364_0.mp4" "https://drive.google.com/uc?id=1vVwjW1dE1drIdd4ZSILfbCGPD4weoNiu" || echo "Failed to download 121364_0.mp4"
-    fi
-  else
-    echo "src/setup.sh not found; skipping sample assets" >&2
+# Function to download from Google Drive with multiple fallback methods
+download_gdrive() {
+  local file_id="$1"
+  local output_path="$2"
+  local filename=$(basename "$output_path")
+
+  # Skip if file already exists and is non-empty
+  if [[ -f "$output_path" && -s "$output_path" ]]; then
+    echo "  $filename already exists, skipping"
+    return 0
   fi
+
+  echo "  Downloading $filename..."
+
+  # Method 1: gdown (standard)
+  if gdown -O "$output_path" "https://drive.google.com/uc?id=$file_id" 2>/dev/null; then
+    if [[ -s "$output_path" ]]; then
+      echo "  ✓ $filename downloaded via gdown"
+      return 0
+    fi
+  fi
+
+  # Method 2: gdown with --fuzzy flag
+  if gdown --fuzzy -O "$output_path" "https://drive.google.com/file/d/$file_id/view" 2>/dev/null; then
+    if [[ -s "$output_path" ]]; then
+      echo "  ✓ $filename downloaded via gdown --fuzzy"
+      return 0
+    fi
+  fi
+
+  # Method 3: curl with confirmation bypass
+  local confirm_url="https://drive.google.com/uc?export=download&id=$file_id"
+  local confirm_code=$(curl -sc /tmp/gcookie "$confirm_url" 2>/dev/null | grep -o 'confirm=[^&]*' | head -1)
+  if [[ -n "$confirm_code" ]]; then
+    curl -Lb /tmp/gcookie "${confirm_url}&${confirm_code}" -o "$output_path" 2>/dev/null
+  else
+    curl -L "$confirm_url" -o "$output_path" 2>/dev/null
+  fi
+
+  if [[ -s "$output_path" ]]; then
+    echo "  ✓ $filename downloaded via curl"
+    return 0
+  fi
+
+  # Method 4: wget fallback
+  wget -q --no-check-certificate "https://drive.google.com/uc?export=download&id=$file_id" -O "$output_path" 2>/dev/null
+  if [[ -s "$output_path" ]]; then
+    echo "  ✓ $filename downloaded via wget"
+    return 0
+  fi
+
+  echo "  ✗ Failed to download $filename"
+  rm -f "$output_path"
+  return 1
+}
+
+if [[ "${SKIP_ASSETS:-0}" != "1" ]]; then
+  mkdir -p "$ROOT/src/models" "$ROOT/src/input_videos"
+
+  echo "Downloading models..."
+  download_gdrive "1isw4wx-MK9h9LMr36VvIWlJD6ppUvw7V" "$ROOT/src/models/ball_detection.pt"
+  download_gdrive "17PXFNlx-jI7VjVo_vQnB1sONjRyvoB-q" "$ROOT/src/models/player_detection.pt"
+  download_gdrive "1Ma5Kt86tgpdjCTKfum79YMgNnSjcoOyf" "$ROOT/src/models/pitch_detection.pt"
+
+  echo "Downloading sample videos..."
+  download_gdrive "12TqauVZ9tLAv8kWxTTBFWtgt2hNQ4_ZF" "$ROOT/src/input_videos/0bfacc_0.mp4"
+  download_gdrive "1vVwjW1dE1drIdd4ZSILfbCGPD4weoNiu" "$ROOT/src/input_videos/121364_0.mp4"
 fi
 
 mkdir -p "$ROOT/src/input_videos" "$ROOT/src/output_videos" "$ROOT/src/stubs" "$ROOT/src/models"
