@@ -110,6 +110,7 @@ def run(
     voronoi_overlay: bool = False,
     no_radar: bool = False,
     show_analytics: bool = False,
+    pitch_backend: str | None = None,
 ) -> Iterator[np.ndarray]:
     """Run all pipeline - detection, tracking, team classification.
 
@@ -125,6 +126,7 @@ def run(
         voronoi_overlay: Whether to project Voronoi diagram onto video frame
         no_radar: Whether to hide the radar overlay (default False = show radar)
         show_analytics: Whether to print analytics summary at end
+        pitch_backend: Optional override for pitch model backend
 
     Yields:
         Annotated frames with full analysis
@@ -139,7 +141,7 @@ def run(
         conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
         stretch=PITCH_MODEL_STRETCH,
         imgsz=PITCH_MODEL_IMG_SIZE,
-        backend=PITCH_MODEL_BACKEND,
+        backend=pitch_backend or PITCH_MODEL_BACKEND,
         model_id=PITCH_MODEL_ID,
         api_key_env=ROBOFLOW_API_KEY_ENV,
     )

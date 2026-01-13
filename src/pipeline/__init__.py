@@ -39,6 +39,7 @@ def get_frame_generator(
     show_analytics: bool = False,
     # Pitch debug mode
     debug_pitch: bool = False,
+    pitch_backend: str | None = None,
 ) -> Iterator[np.ndarray]:
     """Get appropriate frame generator for pipeline mode.
 
@@ -51,6 +52,7 @@ def get_frame_generator(
         fast_ball: Disable slicer for speed
         ball_config: Ball tracking configuration
         use_ball_model_weights: Whether to use dedicated ball model weights
+        pitch_backend: Optional override for pitch model backend
 
     Returns:
         Iterator yielding annotated frames
@@ -60,7 +62,12 @@ def get_frame_generator(
 
     if mode == Mode.PITCH_DETECTION:
         from .pitch import run as run_pitch
-        return run_pitch(source_video_path=source_video_path, device=device, debug=debug_pitch)
+        return run_pitch(
+            source_video_path=source_video_path,
+            device=device,
+            debug=debug_pitch,
+            pitch_backend=pitch_backend,
+        )
 
     if mode == Mode.PLAYER_DETECTION:
         from .players import run as run_players
@@ -118,6 +125,7 @@ def get_frame_generator(
             voronoi_overlay=voronoi_overlay,
             no_radar=no_radar,
             show_analytics=show_analytics,
+            pitch_backend=pitch_backend,
         )
 
     if mode == Mode.RADAR:
@@ -136,6 +144,7 @@ def get_frame_generator(
             show_keypoints=show_keypoints,
             voronoi_overlay=voronoi_overlay,
             show_analytics=show_analytics,
+            pitch_backend=pitch_backend,
         )
 
     raise NotImplementedError(f"Mode {mode} is not implemented.")

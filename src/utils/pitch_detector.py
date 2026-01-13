@@ -75,6 +75,9 @@ class PitchDetector:
                 ) from exc
             self.model = get_model(model_id=self.model_id, api_key=api_key)
         elif self.backend == "ultralytics":
+            if not self.stretch:
+                # Match Roboflow inference preprocessing by stretching to square.
+                self.stretch = True
             if not PITCH_DETECTION_MODEL_PATH.exists():
                 raise FileNotFoundError(
                     f"Pitch detection model not found at: {PITCH_DETECTION_MODEL_PATH}\n"

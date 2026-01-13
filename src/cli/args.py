@@ -116,6 +116,21 @@ def parse_args() -> argparse.Namespace:
     # Pitch debug mode
     parser.add_argument("--debug-pitch", action="store_true",
                         help="Debug mode: show keypoint indices for diagnosing ordering issues")
+    parser.add_argument(
+        "--pitch-backend",
+        dest="pitch_backend",
+        type=str,
+        choices=("inference", "ultralytics"),
+        default=None,
+        help="Override pitch model backend (inference or ultralytics)",
+    )
+    parser.add_argument(
+        "--pitch-local",
+        dest="pitch_backend",
+        action="store_const",
+        const="ultralytics",
+        help="Use local pitch model weights (same as --pitch-backend ultralytics)",
+    )
 
     # Caching (hyphen primary, underscore for backward compat)
     parser.add_argument("--no-stub", "--no_stub",

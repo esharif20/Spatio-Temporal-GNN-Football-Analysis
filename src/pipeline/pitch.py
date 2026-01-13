@@ -104,7 +104,12 @@ def keypoints_well_distributed(
     return x_spread > min_spread and y_spread > min_spread
 
 
-def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np.ndarray]:
+def run(
+    source_video_path: str,
+    device: str,
+    debug: bool = False,
+    pitch_backend: str | None = None,
+) -> Iterator[np.ndarray]:
     """Run pitch detection mode with per-frame homography.
 
     Mirrors the notebook approach: per-frame homography from filtered keypoints
@@ -114,6 +119,7 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
         source_video_path: Path to input video
         device: Device for inference
         debug: If True, show keypoint indices for debugging ordering issues
+        pitch_backend: Optional override for pitch model backend
 
     Yields:
         Annotated frames with pitch keypoints and edges
@@ -125,7 +131,7 @@ def run(source_video_path: str, device: str, debug: bool = False) -> Iterator[np
         conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
         stretch=PITCH_MODEL_STRETCH,
         imgsz=PITCH_MODEL_IMG_SIZE,
-        backend=PITCH_MODEL_BACKEND,
+        backend=pitch_backend or PITCH_MODEL_BACKEND,
         model_id=PITCH_MODEL_ID,
         api_key_env=ROBOFLOW_API_KEY_ENV,
     )

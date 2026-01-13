@@ -91,6 +91,7 @@ def run(
     radar_opacity: float = 0.85,
     radar_scale: float = 0.25,
     radar_position: str = "bottom_center",
+    pitch_backend: str | None = None,
 ) -> Iterator[np.ndarray]:
     """Run radar pipeline - detection, tracking, team classification with pitch overlay.
 
@@ -111,6 +112,7 @@ def run(
         radar_opacity: Opacity of radar overlay (0-1)
         radar_scale: Scale of radar relative to frame width
         radar_position: Position of radar on frame
+        pitch_backend: Optional override for pitch model backend
 
     Yields:
         Annotated frames with radar overlay
@@ -122,7 +124,7 @@ def run(
         conf_threshold=PITCH_MODEL_CONF_THRESHOLD,
         stretch=PITCH_MODEL_STRETCH,
         imgsz=PITCH_MODEL_IMG_SIZE,
-        backend=PITCH_MODEL_BACKEND,
+        backend=pitch_backend or PITCH_MODEL_BACKEND,
         model_id=PITCH_MODEL_ID,
         api_key_env=ROBOFLOW_API_KEY_ENV,
     )

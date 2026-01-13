@@ -73,6 +73,7 @@ def main() -> None:
         show_analytics=args.analytics,
         # Pitch debug mode
         debug_pitch=args.debug_pitch,
+        pitch_backend=args.pitch_backend,
     )
 
     # Write output video
