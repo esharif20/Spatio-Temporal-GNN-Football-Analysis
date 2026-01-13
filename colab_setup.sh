@@ -38,6 +38,15 @@ if [[ -f "$ROOT/src/setup.sh" ]]; then
   chmod +x "$ROOT/src/setup.sh"
 fi
 
+# Seed .env if provided via environment or file path
+if [[ ! -f "$ROOT/.env" ]]; then
+  if [[ -n "${ROBOFLOW_API_KEY:-}" ]]; then
+    echo "ROBOFLOW_API_KEY=$ROBOFLOW_API_KEY" > "$ROOT/.env"
+  elif [[ -n "${ENV_PATH:-}" && -f "$ENV_PATH" ]]; then
+    cp "$ENV_PATH" "$ROOT/.env"
+  fi
+fi
+
 if [[ -n "$CACHE_ROOT" ]]; then
   mkdir -p "$CACHE_ROOT"/{input_videos,models}
   if compgen -G "$CACHE_ROOT/input_videos/*.mp4" > /dev/null; then

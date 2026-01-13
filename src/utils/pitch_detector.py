@@ -55,9 +55,13 @@ class PitchDetector:
                 ENV_FILE,
                 ENV_FILE.parent.parent / ".env",
                 Path.cwd() / ".env",
+                Path.cwd().parent / ".env",
+                Path("/content/football_analysis/.env"),
+                Path("/content/.env"),
+                Path("/content/drive/MyDrive/.env"),
             ]
             self._load_env_files(env_candidates)
-            api_key = os.getenv(self.api_key_env)
+            api_key = (os.getenv(self.api_key_env) or "").strip()
             if not api_key:
                 raise ValueError(
                     f"Missing Roboflow API key in env var {self.api_key_env}."
@@ -106,10 +110,14 @@ class PitchDetector:
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
                 key, value = line.split("=", 1)
                 key = key.strip()
                 value = value.strip().strip('"').strip("'")
-                os.environ.setdefault(key, value)
+                if key in os.environ and os.environ[key].strip():
+                    continue
+                os.environ[key] = value
 
     def detect(self, frame: np.ndarray) -> sv.KeyPoints:
         """Detect pitch keypoints in a frame.
