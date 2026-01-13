@@ -47,14 +47,15 @@ class ViewTransformer:
         source = source.astype(np.float32)
         target = target.astype(np.float32)
 
-        self.m, mask = cv2.findHomography(source, target, cv2.RANSAC, 5.0)
+        # Use standard least-squares (no RANSAC) to match the blog exactly
+        self.m, _ = cv2.findHomography(source, target)
         if self.m is None:
             raise ValueError(
                 "Homography matrix could not be calculated. "
                 "Check that points are not collinear."
             )
 
-        self._inlier_count = int(mask.sum()) if mask is not None else source.shape[0]
+        self._inlier_count = source.shape[0]  # All points used without RANSAC
 
     @property
     def inlier_count(self) -> int:
